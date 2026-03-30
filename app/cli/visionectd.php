@@ -365,8 +365,8 @@ class DisplayServer implements MessageComponentInterface {
 	private function getHaConfig() {
 		$defaults = array(
 			'enabled' => false,
-			'base_url' => 'http://homeassistant.local:8123',
-			'entity_id' => 'device_tracker.someone_phone',
+			'base_url' => 'http://172.16.3.2:8123',
+			'entity_id' => 'device_tracker.alex_bayesian',
 			'home_state' => 'home',
 			'access_token' => '',
 			'timeout' => 10,
@@ -394,16 +394,14 @@ class DisplayServer implements MessageComponentInterface {
 		);
 
 		$path = '/app/config/general_settings.json';
-		if (!file_exists($path)) {
-			return $defaults;
-		}
-
-		$config = visionect_read_json_file($path);
 		$general = $defaults;
 		$raw = array();
-		if (is_array($config)) {
-			$raw = $config;
-			$general = array_merge($defaults, $config);
+		if (file_exists($path)) {
+			$config = visionect_read_json_file($path);
+			if (is_array($config)) {
+				$raw = $config;
+				$general = array_merge($defaults, $config);
+			}
 		}
 
 		$legacy = $this->getHaConfig();

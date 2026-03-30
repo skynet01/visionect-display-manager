@@ -272,7 +272,7 @@ tailwind.config = {
           <input type="hidden" name="_csrf" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
           <label class="block text-sm text-slate-300">
             <span class="mb-2 block">Username</span>
-            <input type="text" name="username" autocomplete="username" class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none" required>
+            <input type="text" name="username" autocomplete="username" class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none" <?php echo !$hasAdminAccount ? 'value="Alex"' : ''; ?> required>
           </label>
           <label class="block text-sm text-slate-300">
             <span class="mb-2 block">Password</span>
@@ -1249,8 +1249,45 @@ function moduleCronVerb(module) {
   return module === 'ainews' ? 'Generate latest now' : 'Run cron now';
 }
 
+function isConfiguredSleepWindowActive() {
+  const cfg = state.generalConfig || {};
+  const wake = String(cfg.wake_time || '').trim();
+  const sleep = String(cfg.sleep_time || '').trim();
+  if (!cfg.sleep_enabled || !isValidTimeText(wake) || !isValidTimeText(sleep)) {
+    return false;
+  }
+  if (wake === sleep) {
+    return false;
+  }
+
+  const now = new Date();
+  const hm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return sleep > wake
+    ? (hm >= sleep || hm < wake)
+    : (hm >= sleep && hm < wake);
+}
+
 function isRuntimeSleeping() {
-  return (state.runtimeStatus?.display?.activity || state.activity) === 'sleep';
+  return (state.runtimeStatus?.display?.activity || state.activity) === 'sleep' || isConfiguredSleepWindowActive();
+}
+
+function liveBadgeState() {
+  if (isRuntimeSleeping()) {
+    return {
+      label: 'Sleeping',
+      className: 'rounded-full border border-white/10 px-3 py-1 text-xs text-sky-300',
+    };
+  }
+  if (state.paused) {
+    return {
+      label: 'Paused',
+      className: 'rounded-full border border-white/10 px-3 py-1 text-xs text-rose-300',
+    };
+  }
+  return {
+    label: 'Running',
+    className: 'rounded-full border border-white/10 px-3 py-1 text-xs text-emerald-300',
+  };
 }
 
 function nextWakeLabel() {
@@ -1449,6 +1486,7 @@ function renderLive() {
     : 'Waiting for frame request…';
   const nextUrl = selectedModulePreviewUrl();
   state.lastFrameExactUrl = state.runtimeStatus?.frame?.exact_url || null;
+  const liveState = liveBadgeState();
   el('panel-live').innerHTML = `
     <div class="space-y-4">
       <div class="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_380px]">
@@ -1459,8 +1497,8 @@ function renderLive() {
               <p class="text-[11px] uppercase tracking-[0.35em] text-amber-400/80">Live Control</p>
               <h2 class="mt-1 text-xl font-bold">What the display is doing right now</h2>
             </div>
-            <div class="rounded-full border border-white/10 px-3 py-1 text-xs ${state.paused ? 'text-rose-300' : 'text-emerald-300'}" id="liveBadge">
-              ${state.paused ? 'Paused' : 'Running'}
+            <div class="${liveState.className}" id="liveBadge">
+              ${liveState.label}
             </div>
           </div>
           <div class="mt-5 space-y-3">
@@ -2208,7 +2246,8 @@ function renderSystemHealthCard() {
 }
 
 function updateLiveStatusUI() {
-  if (isRuntimeSleeping()) {
+  const sleeping = isRuntimeSleeping();
+  if (sleeping) {
     const wakeSeconds = nextWakeSeconds();
     if (wakeSeconds !== null) {
       state.countdown = wakeSeconds;
@@ -2217,8 +2256,15 @@ function updateLiveStatusUI() {
   }
   const liveBadge = el('liveBadge');
   if (liveBadge) {
-    liveBadge.textContent = state.paused ? 'Paused' : 'Running';
-    liveBadge.className = `rounded-full border border-white/10 px-3 py-1 text-xs ${state.paused ? 'text-rose-300' : 'text-emerald-300'}`;
+    const liveState = liveBadgeState();
+    liveBadge.textContent = liveState.label;
+    liveBadge.className = liveState.className;
+  }
+  const reloadButton = el('reloadCurrentBtn');
+  if (reloadButton) {
+    reloadButton.disabled = sleeping;
+    reloadButton.className = `rounded-full border border-white/10 p-2 text-slate-300 transition ${sleeping ? 'cursor-not-allowed opacity-50' : 'hover:border-sky-400/60 hover:text-white'}`;
+    reloadButton.title = sleeping ? `Frame asleep until ${nextWakeLabel()}` : 'Reload current page';
   }
   const pageSelect = el('pageSelect');
   if (pageSelect && state.currentPage) {
