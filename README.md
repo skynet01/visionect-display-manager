@@ -4,7 +4,7 @@ A self-hosted PHP control panel and content app for a Visionect e-ink frame, pac
 
 This project is designed around the [Visionect Place & Play 32](https://www.visionect.com/shop/place-play-32/) frame and a portrait rendering target of `1440 × 2560`.
 
-Initial module design, the original project idea, and the early cron-based content pipeline are credited to Arjan Haverkamp (`arjan@avoid.org`).
+Initial module design, the original project idea, and the early cron-based content pipeline are credited to Arjan Haverkamp.
 
 This project was built and iterated with AI assistance. The codebase, admin workflows, setup flow, documentation, and UI refinements were developed through an AI-assisted collaboration process rather than as a purely hand-written one-shot build.
 
