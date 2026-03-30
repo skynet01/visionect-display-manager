@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Visionect Dynamic Display</title>
+	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Expires" content="0">
+	<style>
+	iframe {
+		display: block;
+		border: 0;
+		position: fixed;
+		top: 0;
+		left: 0;
+		bottom: 0;
+		right: 0;
+		width: 100vw;
+		height: 100vh;
+	}
+
+	#disconnected {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		font-size: 20pt;
+		font-weight: 700;
+		font-family: Helvetica;
+		background: #000;
+		color: #fff;
+		z-index: 1;
+		display: none;
+		text-align: center;
+	}
+
+	#status {
+		font-family: Helvetica;
+		position: fixed;
+		left: 0;
+		bottom: 0;
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	#status > div {
+		font-size: 1.5em;
+		background: rgba(255,255,255,0.75);
+		padding: 0.25em 0.25em 0 0.25em;
+		color: #000;
+		border-top-right-radius: 0.5em;
+		border-top-left-radius: 0.5em;
+		border: 1px solid #000;
+	}
+	</style>
+</head>
+<body>
+	<div id="disconnected">&nbsp;</div>
+	<iframe id="contentFrame" src="about:blank"></iframe>
+
+<!--	Uncomment below to show status -->
+<!--	<div id="status"></div> -->
+	<script>
+		const batteryIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 257.13 142.85" style="height:18px"><path d="M257.13,92.85a14.24,14.24,0,0,1-14.29,14.29V125A17.91,17.91,0,0,1,225,142.85H17.86A17.91,17.91,0,0,1,0,125V17.86A17.91,17.91,0,0,1,17.86,0H225a17.91,17.91,0,0,1,17.86,17.86V35.71A14.24,14.24,0,0,1,257.13,50Zm-14.29,0V50H228.56V17.86A3.53,3.53,0,0,0,225,14.29H17.86a3.52,3.52,0,0,0-3.57,3.57V125a3.52,3.52,0,0,0,3.57,3.57H225a3.53,3.53,0,0,0,3.57-3.57V92.85Z"/><rect x="26" y="26" width="%width%" height="90"></rect></svg>`;
+
+		const iframe = document.getElementById('contentFrame');
+		const disc = document.getElementById('disconnected');
+
+		const socketUrl = token => {
+			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+			return `${protocol}//${window.location.hostname}:12345/?token=${encodeURIComponent(token)}`;
+		};
+
+		const resolveFrameUrl = url => {
+			if (!url) {
+				return 'about:blank';
+			}
+			if (/^(?:https?:)?\/\//i.test(url)) {
+				return url;
+			}
+			return `/${String(url).replace(/^\/+/, '')}`;
+		};
+
+		const withReloadStamp = url => {
+			if (!url || url === 'about:blank') {
+				return url;
+			}
+			return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_frameReload=' + Date.now();
+		};
+
+		const navigateFrame = url => {
+			const target = resolveFrameUrl(url);
+			const current = iframe.getAttribute('src') || '';
+			if (current === target) {
+				iframe.setAttribute('src', withReloadStamp(target));
+				return;
+			}
+			iframe.setAttribute('src', target);
+		};
+
+		const fetchSocketToken = callback => {
+			const xhr = new XMLHttpRequest();
+			xhr.open('GET', '/status.php?ws_token=1', true);
+			xhr.onreadystatechange = () => {
+				if (xhr.readyState !== 4) {
+					return;
+				}
+				if (xhr.status < 200 || xhr.status >= 300) {
+					callback(new Error(`Token request failed (${xhr.status})`));
+					return;
+				}
+				try {
+					const json = JSON.parse(xhr.responseText || '{}');
+					if (!json.token) {
+						callback(new Error('Missing WebSocket token'));
+						return;
+					}
+					callback(null, json.token);
+				} catch (error) {
+					callback(error);
+				}
+			};
+			xhr.send();
+		};
+
+		const openWebsocket = () => {
+			fetchSocketToken((error, token) => {
+				if (error || !token) {
+					disc.innerHTML = 'Socket auth failed';
+					disc.style.display = 'block';
+					setTimeout(() => {
+						openWebsocket();
+					}, 10000);
+					return;
+				}
+
+				const socket = new WebSocket(socketUrl(token));
+
+				socket.onerror = () => {
+					disc.innerHTML = 'Socket error';
+					disc.style.display = 'block';
+				};
+
+				socket.onopen = () => {
+					disc.style.display = 'none';
+				};
+
+				socket.onmessage = e => {
+					const json = JSON.parse(e.data);
+					if ('url' in json) {
+						navigateFrame(json.url);
+					}
+				};
+
+				socket.onclose = () => {
+					disc.innerHTML = 'Socket closed';
+					disc.style.display = 'block';
+					setTimeout(() => {
+						openWebsocket();
+					}, 10000);
+				};
+			});
+		};
+
+		openWebsocket();
+		// // --- Show status of the frame at the bottom, battery and weather
+		// const showStatus = () => {
+		// 	let deviceStatus;
+		// 	if (typeof okular == 'undefined') {
+		// 		deviceStatus = {
+		// 			'Battery': 89,
+		// 			'Temperature': 20
+		// 		}
+		// 	}
+		// 	else {
+		// 		const devicesStatus = okular.DevicesStatus();
+		// 		let firstKey = Object.keys(devicesStatus)[0];
+		// 		deviceStatus = devicesStatus[firstKey];
+		// 	}
+		//
+		// 	let width = 190/100 * deviceStatus.Battery;
+		// 	document.getElementById('status').innerHTML = '<div>' + batteryIcon.replace('%width%', width) + '&nbsp;' + deviceStatus.Battery + '% &middot; ' + deviceStatus.Temperature + '&deg;C' + '</div>';
+		// }
+	</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+	<title>Clock - Digital</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Jura&family=Michroma&family=Open+Sans&family=Qahiri&display=swap" rel="stylesheet">
+	<style>
+	html, body {
+		height: 100vh;
+		margin: 0;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	</style>
+</head>
+<body>
+	<main>
+	</main>
+	<script>
+	var options = [
+		'Jura:35vw',
+		'Michroma:25vw',
+		'Open Sans:35vw',
+		'Qahiri:70vw'
+	];
+	var item = options[Math.floor(Math.random()*options.length)].split(':');
+
+	var date = new Date();
+	var hh = date.getHours(), mm = date.getMinutes();
+	if (hh < 10) { hh = '0' + hh; }
+	if (mm < 10) { mm = '0' + mm; }
+	var main = document.querySelector('main');
+	main.style.fontFamily = item[0];
+	main.style.fontSize = item[1];
+	main.innerHTML = hh+':'+mm;
+	</script>
+</body>
+</html>

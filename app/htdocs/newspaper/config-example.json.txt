@@ -1,0 +1,4 @@
+{
+  "LosAngelesTimes":  {"prefix":"CA_LAT", "style": "width:93%;margin-left:-1rem;margin-top:-3rem"}
+
+}

@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "base_url": "http://homeassistant.local:8123",
+  "entity_id": "device_tracker.someone_phone",
+  "home_state": "home",
+  "access_token": "",
+  "timeout": 10
+}

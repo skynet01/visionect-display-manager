@@ -1,0 +1,288 @@
+<!doctype html>
+<html>
+<head>
+	<meta name="robots" content="noindex,nofollow,noarchive">
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no,minimal-ui">
+	<meta name="theme-color" content="#000">
+	<title>Clock Clock 24</title>
+	<style>
+
+html {
+  background-color: #000;
+  width: 100vw;
+  height: 100vh;
+}
+
+body {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+	padding: 0;
+	margin: 0;
+	overflow: hidden;
+}
+
+.digit {
+  float: left;
+}
+
+.clock {
+  --small-hand: -135deg;
+  --large-hand: -45deg;
+  margin: 0.3vw;
+  width: 11.5vw;
+  height: 11.5vw;
+  border-radius: 50%;
+  box-shadow: inset 0 -1px 3px rgba(255, 255, 255, 0.7);
+  float: left;
+}
+.clock:nth-of-type(2n+1) {
+  clear: left;
+}
+
+.clock-smallHand,
+.clock-largeHand {
+  transform-origin: 50px center;
+}
+
+.clock-smallHand {
+  transform: rotateZ(var(--small-hand));
+}
+
+.clock-largeHand {
+  transform: rotateZ(var(--large-hand));
+}
+
+.trigger {
+  position: fixed;
+  bottom: 0;
+  width: 25%;
+  height: 5vw;
+  cursor: help;
+}
+
+svg path {
+	fill: #eee;
+}
+
+	</style>
+</head>
+<body>
+<div class="art">
+  <div class="digit">
+    <svg class="clock clock--0" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--1" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--2" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--3" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--4" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--5" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+  </div>
+  <div class="digit">
+    <svg class="clock clock--6" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--7" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--8" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--9" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--10" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--11" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+  </div>
+  <div class="digit">
+    <svg class="clock clock--12" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--13" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--14" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--15" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--16" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--17" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+  </div>
+  <div class="digit">
+    <svg class="clock clock--18" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--19" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--20" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--21" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--22" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+    <svg class="clock clock--23" width="100" height="100" viewBox="0 0 100 100">
+      <path class="clock-smallHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L95,53 L95,47 L50,47 Z"></path>
+      <path class="clock-largeHand" d="M50,47 C48.3431458,47 47,48.3431458 47,50 C47,51.6568542 48.3431458,53 50,53 L100,53 L100,47 L50,47 Z"></path>
+    </svg>
+  </div>
+</div>
+<script>
+
+const digits = [
+[// 0
+{ hour: 6, minute: 15 },
+{ hour: 9, minute: 30 },
+{ hour: 6, minute: 0 },
+{ hour: 0, minute: 30 },
+{ hour: 3, minute: 0 },
+{ hour: 0, minute: 45 }],
+[// 1
+{ hour: 7.5, minute: 37.5 },
+{ hour: 6, minute: 30 },
+{ hour: 7.5, minute: 37.5 },
+{ hour: 6, minute: 0 },
+{ hour: 7.5, minute: 37.5 },
+{ hour: 0, minute: 0 }],
+[// 2
+{ hour: 3, minute: 15 },
+{ hour: 9, minute: 30 },
+{ hour: 6, minute: 15 },
+{ hour: 0, minute: 45 },
+{ hour: 0, minute: 15 },
+{ hour: 9, minute: 45 }],
+[// 3
+{ hour: 3, minute: 15 },
+{ hour: 9, minute: 30 },
+{ hour: 3, minute: 15 },
+{ hour: 9, minute: 0 },
+{ hour: 3, minute: 15 },
+{ hour: 9, minute: 0 }],
+[// 4
+{ hour: 6, minute: 30 },
+{ hour: 6, minute: 30 },
+{ hour: 0, minute: 15 },
+{ hour: 6, minute: 0 },
+{ hour: 7.5, minute: 37.5 },
+{ hour: 0, minute: 0 }],
+[// 5
+{ hour: 6, minute: 15 },
+{ hour: 9, minute: 45 },
+{ hour: 0, minute: 15 },
+{ hour: 6, minute: 45 },
+{ hour: 3, minute: 15 },
+{ hour: 0, minute: 45 }],
+[// 6
+{ hour: 6, minute: 15 },
+{ hour: 9, minute: 45 },
+{ hour: 6, minute: 0 },
+{ hour: 6, minute: 45 },
+{ hour: 0, minute: 15 },
+{ hour: 0, minute: 45 }],
+[// 7
+{ hour: 3, minute: 15 },
+{ hour: 6, minute: 45 },
+{ hour: 7.5, minute: 37.5 },
+{ hour: 6, minute: 0 },
+{ hour: 7.5, minute: 37.5 },
+{ hour: 0, minute: 0 }],
+[// 8
+{ hour: 6, minute: 15 },
+{ hour: 6, minute: 45 },
+{ hour: 0, minute: 15 },
+{ hour: 0, minute: 45 },
+{ hour: 0, minute: 15 },
+{ hour: 0, minute: 45 }],
+[// 9
+{ hour: 6, minute: 15 },
+{ hour: 6, minute: 45 },
+{ hour: 3, minute: 0 },
+{ hour: 6, minute: 0 },
+{ hour: 3, minute: 15 },
+{ hour: 0, minute: 45 }]];
+
+function hourToDegrees(hour) {
+  return hour * (360 / 12) - 90;
+}
+
+function minuteToDegrees(minute) {
+  return minute * (360 / 60) - 90;
+}
+
+function setHands(id, hour, minute) {
+  const clock = document.querySelector('.clock--' + id);
+  clock.style.setProperty(`--small-hand`, hourToDegrees(hour) + 360 + 'deg');
+  clock.style.setProperty(`--large-hand`, minuteToDegrees(minute) - 360 + 'deg');
+}
+
+function setDigit(id, values) {
+  for (let x = 0; x < 6; x++) {
+    setHands(id * 6 + x, values[x].hour, values[x].minute);
+  }
+}
+
+function setTime(time) {
+  setDigit(0, digits[time.charAt(0)]);
+  setDigit(1, digits[time.charAt(1)]);
+  setDigit(2, digits[time.charAt(3)]);
+  setDigit(3, digits[time.charAt(4)]);
+}
+
+const time = new Date(Date.now() + 10000).toTimeString().substr(0,5);
+setTime(time);
+
+</script>
+</body>
+</html>
+

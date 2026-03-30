@@ -1,0 +1,12 @@
+{
+  "gap_strip": 32,
+  "gap_min": 6,
+  "gap_max": 48,
+  "strips": [
+    {"slug": "garfield", "label": "Garfield", "type": "gocomics", "enabled": true, "order": 1},
+    {"slug": "pearlsbeforeswine", "label": "Pearls Before Swine", "type": "gocomics", "enabled": true, "order": 2},
+    {"slug": "calvinandhobbes", "label": "Calvin and Hobbes", "type": "gocomics", "enabled": true, "order": 3},
+    {"slug": "dilbert", "label": "Dilbert", "type": "dilbert", "enabled": true, "order": 4},
+    {"slug": "farside", "label": "Far Side", "type": "hardcoded", "enabled": true, "order": 5}
+  ]
+}

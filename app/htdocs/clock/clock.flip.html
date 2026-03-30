@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+	<title>Clock - Flip</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Saira+Extra+Condensed:wght@500&display=swap" rel="stylesheet">
+<style>
+
+body {
+	margin: 0;
+	display: flex;
+	height: 100vh;
+	align-items: center;
+	justify-content: center;
+	background-color: rgb(38, 37, 41);
+	color: #fff;
+	font-family: "Saira Extra Condensed", sans-serif;
+}
+
+.clock {
+	transform-origin: center center;
+	transform: scale(3);
+	width: 330px;
+	height: 212px;
+	border-radius: 30px;
+	background-image: linear-gradient(
+		rgb(14, 14, 15) 0%,
+		rgb(26, 25, 28) 20%,
+		rgb(44, 44, 52) 50%,
+		rgb(20, 20, 27) 100%
+	);
+	box-shadow: inset 0 -3px 6px 3px rgba(0, 0, 0, 0.2),
+		inset 0 4px 8px 3px rgba(0, 0, 0, 0.4),
+		0 2px 3px 1px rgba(255, 255, 255, 0.3), 0 -2px 4px 4px rgba(56, 56, 61, 0.5);
+}
+
+.clock table td {
+	width: 140px;
+	height: 212px;
+}
+
+.flipper {
+	position: relative;
+	width: 100%;
+	min-width: 150px;
+	height: 100%;
+	transform-style: preserve-3d;
+	perspective: 1600px;
+}
+.gear {
+	position: absolute;
+	top: 63px;
+	width: 12px;
+	height: 73px;
+	background: linear-gradient(
+		to bottom,
+		#000000 0%,
+		#666666 17%,
+		#7f7f7f 52%,
+		#7f7f7f 52%,
+		#0c0c0c 53%,
+		#595959 87%,
+		#131313 100%
+	);
+	outline: 3px solid #000;
+	z-index: 99;
+	transform-style: preserve-3d;
+	transform: translateZ(10px);
+	perspective: 0;
+}
+.gear:nth-child(2) {
+	left: calc(100% - 12px);
+}
+.top,
+.bottom {
+	box-shadow: 0 6px 6px 1px rgba(0, 0, 0, 0.5),
+	 0 2px 2px 1px rgba(255, 255, 255, 0.15);
+	border-top: 2px solid rgb(102, 103, 110);
+	border-bottom: 2px solid #000;
+}
+.top {
+	position: relative;
+	width: 100%;
+	height: calc(50% - 15px);
+	background-image: linear-gradient(rgb(48, 49, 53) 0%, rgb(56, 57, 62) 100%);
+	margin-top: 10px;
+	margin-bottom: 5px;
+	border-top-left-radius: 20px;
+	border-top-right-radius: 20px;
+}
+.bottom {
+	position: relative;
+	width: 100%;
+	height: calc(50% - 15px);
+	background-image: linear-gradient(rgb(57, 58, 63) 0%, rgb(65, 65, 71) 100%);
+	margin-top: 5px;
+	margin-bottom: 10px;
+	border-bottom-left-radius: 20px;
+	border-bottom-right-radius: 20px;
+}
+.text {
+	font-size: 140px;
+	display: block;
+	position: absolute;
+	overflow: hidden;
+	width: 100%;
+	height: 100%;
+	line-height: 193px;
+	text-align: center;
+}
+.bottom .text {
+	line-height: 0;
+}
+	</style>
+</head>
+<body>
+<body>
+	<div class="clock">
+		<table cellpadding="5" cellspacing="0"><tr><td style="padding-left:10px">
+
+		<div class="flipper">
+			<div class="gear"></div>
+			<div class="gear"></div>
+			<div class="top">
+				<div id="h0" class="text">00</div>
+			</div>
+			<div class="bottom">
+				<div id="h1" class="text">00</div>
+			</div>
+		</div>
+
+		</td><td>
+
+		<div class="flipper">
+			<div class="gear"></div>
+			<div class="gear"></div>
+			<div class="top">
+				<div id="m0" class="text mm">00</div>
+			</div>
+			<div class="bottom">
+				<div id="m1" class="text mm">00</div>
+			</div>
+		</div>
+
+		</td></tr></table>
+	</div>
+
+<script>
+
+	var date = new Date(), hh = date.getHours(), mm = date.getMinutes();
+	if (hh < 10) { hh = '0' + hh; }
+	if (mm < 10) { mm = '0' + mm; }
+	document.getElementById('h0').innerHTML = document.getElementById('h1').innerHTML = hh;
+	document.getElementById('m0').innerHTML = document.getElementById('m1').innerHTML = mm;
+
+</script>
+</body>
+</html>

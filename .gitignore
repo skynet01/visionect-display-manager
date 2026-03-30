@@ -1,0 +1,13 @@
+.env
+data/
+app/config/admin_account.json
+app/config/secret_key.b64
+app/config/runtime_status.json
+app/config/remote_control.json
+app/config/ha_integration.json
+app/config/general_settings.json
+app/htdocs/ainews/config.local.json
+app/htdocs/comics/metadata.json
+app/htdocs/**/*.log
+app/htdocs/**/*.tmp
+**/.DS_Store

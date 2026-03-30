@@ -1,0 +1,198 @@
+{
+	"pages": {
+		"clock": {
+			"url": "clock/",
+			"chance": 2,
+			"dynamic": true,
+			"duration": 90
+		},
+		"newspaper": {
+			"url": "newspaper/",
+			"chance": 5,
+			"dynamic": true,
+			"duration": 3000
+		},
+		"art": {
+			"url": "art/",
+			"chance": 4,
+			"dynamic": true,
+			"duration": 4100
+		},
+		"haynesmann": {
+			"url": "haynesmann/",
+			"chance": 3,
+			"dynamic": true,
+			"duration": 2800
+		},
+		"comics": {
+			"url": "comics/",
+			"chance": 3,
+			"dynamic": false,
+			"duration": 1200
+		},
+		"quotes": {
+			"url": "quotes/",
+			"chance": 4,
+			"dynamic": true,
+			"duration": 3800
+		},
+		"ainews": {
+			"url": "ainews/",
+			"chance": 5,
+			"dynamic": true,
+			"duration": 3800
+		}
+	},
+	"timeslots": {
+		"morning": {
+			"day_time": {
+				"mon": {
+					"from": "08:45",
+					"till": "11:30"
+				},
+				"tue": {
+					"from": "08:45",
+					"till": "11:30"
+				},
+				"wed": {
+					"from": "08:45",
+					"till": "11:30"
+				},
+				"thu": {
+					"from": "08:45",
+					"till": "11:30"
+				},
+				"fri": {
+					"from": "08:45",
+					"till": "11:30"
+				},
+				"sat": {
+					"from": "09:45",
+					"till": "14:30"
+				},
+				"sun": {
+					"from": "09:45",
+					"till": "14:30"
+				}
+			},
+			"duration": 3000,
+			"pages": [
+				"newspaper"
+				
+			]
+		},
+		"breakfast": {
+			"day_time": {
+				"mon": {
+					"from": "11:30",
+					"till": "15:30"
+				},
+				"tue": {
+					"from": "11:30",
+					"till": "15:30"
+				},
+				"wed": {
+					"from": "11:30",
+					"till": "14:30"
+				},
+				"thu": {
+					"from": "11:30",
+					"till": "15:30"
+				},
+				"fri": {
+					"from": "11:30",
+					"till": "15:30"
+				},
+				"sat": {
+					"from": "14:30",
+					"till": "15:30"
+				},
+				"sun": {
+					"from": "14:30",
+					"till": "15:30"
+				}
+			},
+			"duration": 3800,
+			"pages": [
+				"newspaper",
+				"ainews",
+				"comics"
+			]
+		},
+		"dinner": {
+			"day_time": {
+				"mon": {
+					"from": "15:30",
+					"till": "18:00"
+				},
+				"tue": {
+					"from": "15:30",
+					"till": "18:00"
+				},
+				"wed": {
+					"from": "15:30",
+					"till": "18:00"
+				},
+				"thu": {
+					"from": "15:30",
+					"till": "18:50"
+				},
+				"fri": {
+					"from": "15:30",
+					"till": "18:50"
+				},
+				"sat": {
+					"from": "15:30",
+					"till": "18:50"
+				},
+				"sun": {
+					"from": "15:30",
+					"till": "18:50"
+				}
+			},
+			"duration": 5500,
+			"pages": [
+				"quotes",
+				"haynesmann"
+			]
+		},
+		"night": {
+			"day_time": {
+				"mon": {
+					"from": "18:00",
+					"till": "23:30"
+				},
+				"tue": {
+					"from": "18:00",
+					"till": "23:30"
+				},
+				"wed": {
+					"from": "18:00",
+					"till": "23:30"
+				},
+				"thu": {
+					"from": "18:50",
+					"till": "23:30"
+				},
+				"fri": {
+					"from": "18:50",
+					"till": "23:30"
+				},
+				"sat": {
+					"from": "18:50",
+					"till": "23:30"
+				},
+				"sun": {
+					"from": "18:50",
+					"till": "23:30"
+				}
+			},
+			"duration": 4800,
+			"pages": [
+				"art",
+				"comics",
+				"ainews"
+			]
+		}
+	}
+}

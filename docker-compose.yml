@@ -1,0 +1,82 @@
+version: "3.3"
+
+services:
+  vss:
+    container_name: vss
+    image: visionect/visionect-server-v3:7.6.5-arm
+    privileged: true
+    cap_add:
+      - MKNOD
+      - SYS_ADMIN
+    devices:
+      - "/dev/fuse:/dev/fuse"
+    restart: unless-stopped
+    depends_on:
+      - postgres_db
+      - redis
+    ports:
+      - "8081:8081"
+      - "11113:11113"
+      - "32991:32991"
+      - "11114:11114"
+      - "11115:11115"
+      - "5559:5559"
+      - "5560:5560"
+    environment:
+      - DB2_1_PORT_5432_TCP_ADDR=postgres
+      - DB2_1_PORT_5432_TCP_USER=visionect
+      - DB2_1_PORT_5432_TCP_PASS=visionect
+      - DB2_1_PORT_5432_TCP_DB=koala
+      - REDIS_ADDRESS=redis:6379
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - /dev/shm:/dev/shm
+
+  postgres_db:
+    container_name: visionect-pdb
+    image: postgres:12
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=visionect
+      - POSTGRES_DB=koala
+      - POSTGRES_PASSWORD=visionect
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:5.0.5
+    container_name: visionect-redis
+    restart: always
+    volumes:
+      - ./data/redis:/data
+
+  php-apache:
+    build:
+      context: .
+      dockerfile: docker/php-apache/Dockerfile
+    container_name: visionect-web-content
+    command: >
+      sh -c "apache2-foreground & cd /app/cli && php cron.php && php visionectd.php"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ./app/timezone.ini:/usr/local/etc/php/conf.d/timezone.ini
+      - ./app/htdocs:/var/www/html
+      - ./app:/app
+    ports:
+      - "4412:80"
+      - "12345:12345"
+    restart: unless-stopped
+    depends_on:
+      - postgres_db
+      - redis
+

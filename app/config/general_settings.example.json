@@ -1,0 +1,7 @@
+{
+  "frame_width": 1440,
+  "frame_height": 2560,
+  "sleep_enabled": false,
+  "wake_time": "08:00",
+  "sleep_time": "23:00"
+}

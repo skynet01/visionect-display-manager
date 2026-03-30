@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+	<title>Clock - Word clock</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@800&display=swap" rel="stylesheet">
+	<style>
+		html, body {
+			height: 100vh;
+		}
+
+		body {
+			margin: 0;
+			font-family: 'Open Sans';
+			font-weight: 800;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+      }
+
+      .wc__row__letter {
+        width: 100%;
+        color: #ddd;
+        text-align: center;
+      }
+
+      .wc__row__letter--bright {
+        color: #000;
+      }
+
+      .wc__row__stencil {
+        background: #ddd;
+        display: block;
+        width: 2em;
+        height: #ddd;
+      }
+
+      .wc__row__stencil.wc__row__letter--bright {
+        background: #000;
+      }
+
+      /* Begin: WC Layout (this has to be here) */
+
+      .wc {
+        width: 100vw;
+        height: 100vw;
+        display: flex;
+        font-size: 2.5em;
+        flex-direction: column;
+        justify-content: space-around;
+      }
+
+      .wc__row {
+        width: 100%;
+        display: flex;
+        justify-content: space-around;
+      }
+    </style>
+	<script src="wc_main.js"></script>
+	<script src="wc_langPacks/wc_langPack_EN.js"></script>
+</head>
+<body>
+	<div class="wc">
+	</div>
+</body>
+</html>

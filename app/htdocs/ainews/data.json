@@ -1,0 +1,28 @@
+{
+  "stories": [
+    {
+      "title": "Further human + AI + proof assistant work on Knuth's \"Claude Cycles\" problem",
+      "summary": "Researchers have made progress on a math problem called \"Claude Cycles\" created by Knuth. They used a combination of human work and artificial intelligence to fully solve the problem. This is a significant achievement and people are discussing it online, sharing their thoughts and ideas about the solution.",
+      "source": "Tech",
+      "url": "https://twitter.com/BoWang87/status/2037648937453232504",
+      "image": "story1.jpg",
+      "date": "March 28, 2026"
+    },
+    {
+      "title": "Pricy airfare, airport chaos test travelers' willingness to fly this year",
+      "summary": "People are thinking twice about flying due to high airfare prices and long airport security lines. Some travelers are setting limits on how much they will spend on tickets, while airlines continue to raise prices because of fuel costs and demand.",
+      "source": "Business",
+      "url": "https://www.cnbc.com/2026/03/28/tsa-security-airfare-airports.html",
+      "image": "story2.jpg",
+      "date": "March 28, 2026"
+    },
+    {
+      "title": "Yemen's Houthi rebels enter the fighting in the Middle East",
+      "summary": "Yemen's Houthi rebels have entered the wider conflict in the Middle East, increasing regional tension and raising new questions about how the conflict could spread further.",
+      "source": "Global",
+      "url": "https://www.npr.org/2026/03/28/nx-s1-5763013/yemens-houthi-rebels-enter-the-fighting-in-the-middle-east",
+      "image": "story3.jpg",
+      "date": "March 28, 2026"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "groq_api_key": "",
+  "gemini_api_key": "",
+  "gemini_model": "gemini-2.5-flash-image",
+  "pollinations_api_key": "",
+  "huggingface_api_key": "",
+  "kie_api_key": "",
+  "kie_model": "google/nano-banana",
+  "provider_order": [
+    "kie",
+    "gemini",
+    "pollinations",
+    "huggingface"
+  ],
+  "summary_words": 70,
+  "sources": [
+    {
+      "label": "Tech",
+      "feed": "https://hnrss.org/frontpage?points=100"
+    },
+    {
+      "label": "Business",
+      "feed": "https://www.cnbc.com/id/10001147/device/rss/rss.html"
+    },
+    {
+      "label": "Global",
+      "feed": "https://feeds.npr.org/1004/rss.xml"
+    }
+  ],
+  "image_prompt": "Draw a single-panel black and white comic illustration in the style of The Far Side meets Mad Magazine. The comic should be a witty/funny observation or ironic comment on this specific news story. Think: what is the absurd or ironic none spoken truth hiding inside this story? Show that moment. Characters should feel like real people with funny caricature exaggerations. Avoid speech bubbles, title texts, thought bubbles etc, the illustration should be funny just by looking at it. Black and white ink art, bold outlines, dramatic composition, crosshatching for shading, single panel. CRITICAL: leave the bottom 10% of the image completely empty — no characters, objects, speech bubbles, or any detail whatsoever in that zone. Story: {summary}.",
+  "summary_prompt": "Summarize this news story in about {words} words. Use simple, plain language that anyone can understand. No jargon, no bullet points, no headers — just clear flowing sentences."
+}
+

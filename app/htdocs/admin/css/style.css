@@ -1,0 +1,295 @@
+* {
+  -webkit-box-sizing: border-box;
+     -moz-box-sizing: border-box;
+          box-sizing: border-box;
+}
+*:before,
+*:after {
+  -webkit-box-sizing: border-box;
+     -moz-box-sizing: border-box;
+          box-sizing: border-box;
+}
+
+html {
+	font-size: 18px;
+}
+
+@media (min-width: 480px) {
+   html { font-size: 22px; }
+}
+
+html, body {
+	height: 100%;
+}
+
+body {
+	--switch: #007bff;
+	--switch-bg: #eae8eb;
+	--switch-fg: #fff;
+
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+	background-color: #f4f1f7;
+	color: #000;
+	margin: 0;
+	padding: 0;
+}
+
+body.dark {
+	--switch-bg: #5f5f5f;
+	background-color: #222;
+	color: #fff
+}
+
+.ptr {
+	cursor: pointer;
+}
+
+header, footer {
+	position: fixed;
+	width: 100%;
+	background-color: #fdfafe;
+	padding: 0 1rem;
+	z-index: 2;
+	left: 0;
+}
+
+.dark header, .dark footer {
+	background-color: #121212;
+}
+
+header {
+	top: 0;
+	height: 50px;
+	text-align: center;
+	border-bottom: 1px solid #d7d4d8;
+}
+
+.dark header {
+	border-bottom: 0;
+}
+
+header h1 {
+	margin: 0;
+	font-size: 1.25rem;
+	line-height: 50px;
+	font-weight: 700;
+}
+
+#controls {
+	position: fixed;
+	top: 50px;
+	left: 0;
+	right: 0;
+	height: 50px;
+	line-height: 50px;
+	background-color: #ccc;
+	font-size: 0.65rem;
+	border-top: 1px solid #d7d4d8;
+	padding: 0 1em;
+}
+#controls a {
+	color: #333;
+	text-decoration: none;
+}
+
+main {
+	padding-top: 100px;
+	padding-bottom: 0px;
+}
+
+main iframe {
+	width: 100%;
+	height: calc(100vh - 100px);
+	border: 0;
+	display: block;
+}
+
+.flex {
+	display: flex;
+	justify-content: center;
+}
+.flex > div {
+	flex: 1;
+}
+
+/** Bootstrap Borrow **/
+.img-fluid {
+	max-width: 100%;
+	height: auto;
+}
+.d-flex {
+	display: flex !important;
+}
+.justify-content-between {
+	justify-content: space-between !important;
+}
+.justify-content-around {
+	justify-content: space-around !important;
+}
+
+.btn {
+	display: inline-block;
+	font-weight: 400;
+	text-align: center;
+	vertical-align: middle;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	user-select: none;
+	border: 1px solid var(--switch);
+	transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+	color: var(--switch-fg);
+	background-color: var(--switch);
+	padding: 0.25rem 0.5rem;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	border-radius: 0.2rem;
+}
+
+.btn:hover {
+	color: #212529;
+	text-decoration: none;
+}
+
+.btn:focus, .btn.focus {
+	outline: 0;
+	box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.btn.disabled, .btn:disabled {
+	opacity: 0.75;
+}
+
+.btn:not(:disabled):not(.disabled) {
+  cursor: pointer;
+}
+/** /Bootstrap Borrow **/
+
+/** Toggle Switch **/
+
+.switch {
+	position: relative;
+	display: inline-block;
+	width: 60px;
+	height: 34px;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+.switch input {
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.switch .slider {
+	position: absolute;
+	cursor: pointer;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: var(--switch-bg);
+	-webkit-transition: .2s;
+	transition: .2s;
+}
+
+.switch .slider:before {
+	position: absolute;
+	content: "";
+	background-color: var(--switch-fg);
+	-webkit-transition: .2s;
+	transition: .2s;
+	height: 26px;
+	width: 26px;
+	left: 4px;
+	bottom: 4px;
+	box-shadow: 0 0 4px #ccc;
+}
+.dark .switch .slider:before {
+	box-shadow: none;
+}
+
+.switch input[checked] + .slider {
+	background-color: var(--switch);
+}
+
+.switch input[checked] + .slider:before {
+	-webkit-transform: translateX(26px);
+	transform: translateX(26px);
+	box-shadow: none;
+}
+
+.switch .slider.round {
+	border-radius: 34px;
+}
+
+.switch .slider.round:before {
+  border-radius: 50%;
+} 
+
+/** /Toggle switch **/
+
+/** Select element **/
+
+/* class applies to select element itself, not a wrapper element */
+.select-css {
+  display: inline-block;
+  font-size: 16px;
+  font-family: sans-serif;
+  font-weight: 700;
+  color: #444;
+  line-height: 1.3;
+  padding: .4em 1.4em .2em .8em;
+  max-width: 100%; /* useful when width is set to anything other than 100% */
+  box-sizing: border-box;
+  margin: 0;
+  border: 1px solid #aaa;
+  box-shadow: 0 1px 0 1px rgba(0,0,0,.04);
+  border-radius: .5em;
+  -moz-appearance: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #fff;
+  /* note: bg image below uses 2 urls. The first is an svg data uri for the arrow icon, and the second is the gradient. 
+    for the icon, if you want to change the color, be sure to use `%23` instead of `#`, since it's a url. You can also swap in a different svg icon or an external image reference
+  */
+  background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007CB2%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'),
+    linear-gradient(to bottom, #ffffff 0%,#e5e5e5 100%);
+  background-repeat: no-repeat, repeat;
+  /* arrow icon position (1em from the right, 50% vertical) , then gradient position*/
+  background-position: right .7em top 50%, 0 0;
+  /* icon size, then gradient */
+  background-size: .65em auto, 100%;
+}
+/* Hover style */
+.select-css:hover {
+  border-color: #888;
+}
+/* Focus style */
+.select-css:focus {
+  border-color: #aaa;
+  box-shadow: 0 0 1px 3px rgba(59, 153, 252, .7);
+  box-shadow: 0 0 0 3px -moz-mac-focusring;
+  color: #222; 
+  outline: none;
+}
+
+/* Set options to normal weight */
+.select-css option {
+  font-weight:normal;
+}
+
+/* Disabled styles */
+.select-css:disabled, .select-css[aria-disabled=true] {
+  color: graytext;
+  background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22graytext%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'),
+    linear-gradient(to bottom, #ffffff 0%,#e5e5e5 100%);
+}
+
+.select-css:disabled:hover, .select-css[aria-disabled=true] {
+  border-color: #aaa;
+}
+
+/** /select element **/
+
+
