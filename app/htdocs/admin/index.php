@@ -677,7 +677,7 @@ document.documentElement.classList.toggle('light', savedTheme === 'light');
     </main>
   </div>
   <div class="px-4 pb-4 text-center text-[11px] text-slate-500 sm:px-6">
-    Display Manager v1.0
+    Display Manager v1.1
   </div>
 </div>
 
