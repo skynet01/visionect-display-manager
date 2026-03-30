@@ -10,4 +10,5 @@ app/htdocs/ainews/config.local.json
 app/htdocs/comics/metadata.json
 app/htdocs/**/*.log
 app/htdocs/**/*.tmp
+app/config/gocomics_auth.json
 **/.DS_Store

@@ -80,3 +80,20 @@ services:
       - postgres_db
       - redis
 
+  cookie-refresh:
+    build:
+      context: .
+      dockerfile: docker/docker-cookie-refresh/Dockerfile
+    container_name: visionect-cookie-refresh
+    restart: unless-stopped
+    volumes:
+      - ./app:/app
+    environment:
+      - TZ=${TZ}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "3"
+

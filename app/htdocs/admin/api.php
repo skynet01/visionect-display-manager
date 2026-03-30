@@ -63,11 +63,11 @@ function comics_defaults(): array
         'gap_min' => 6,
         'gap_max' => 48,
         'strips' => [
-            ['slug' => 'garfield', 'label' => 'Garfield', 'type' => 'gocomics', 'enabled' => true, 'order' => 1],
-            ['slug' => 'pearlsbeforeswine', 'label' => 'Pearls Before Swine', 'type' => 'gocomics', 'enabled' => true, 'order' => 2],
-            ['slug' => 'calvinandhobbes', 'label' => 'Calvin and Hobbes', 'type' => 'gocomics', 'enabled' => true, 'order' => 3],
-            ['slug' => 'dilbert', 'label' => 'Dilbert', 'type' => 'dilbert', 'enabled' => true, 'order' => 4],
-            ['slug' => 'farside', 'label' => 'Far Side', 'type' => 'hardcoded', 'enabled' => true, 'order' => 5],
+            ['slug' => 'garfield', 'label' => 'Garfield', 'type' => 'gocomics', 'enabled' => true, 'order' => 1, 'fetch_mode' => 'auto', 'image_url' => ''],
+            ['slug' => 'pearlsbeforeswine', 'label' => 'Pearls Before Swine', 'type' => 'gocomics', 'enabled' => true, 'order' => 2, 'fetch_mode' => 'auto', 'image_url' => ''],
+            ['slug' => 'calvinandhobbes', 'label' => 'Calvin and Hobbes', 'type' => 'gocomics', 'enabled' => true, 'order' => 3, 'fetch_mode' => 'auto', 'image_url' => ''],
+            ['slug' => 'dilbert', 'label' => 'Dilbert', 'type' => 'dilbert', 'enabled' => true, 'order' => 4, 'fetch_mode' => 'auto', 'image_url' => ''],
+            ['slug' => 'farside', 'label' => 'Far Side', 'type' => 'hardcoded', 'enabled' => true, 'order' => 5, 'fetch_mode' => 'auto', 'image_url' => ''],
         ],
     ];
 }
@@ -87,8 +87,8 @@ function default_ha_config(): array
 {
     return [
         'enabled' => false,
-        'base_url' => 'http://homeassistant.local:8123',
-        'entity_id' => 'device_tracker.someone_phone',
+        'base_url' => 'http://172.16.3.2:8123',
+        'entity_id' => 'device_tracker.alex_bayesian',
         'home_state' => 'home',
         'access_token' => '',
         'timeout' => 10,
@@ -285,6 +285,10 @@ function validate_comics_config(array $config): array
             'type' => $type,
             'enabled' => (bool)($strip['enabled'] ?? true),
             'order' => max(1, (int)($strip['order'] ?? ($idx + 1))),
+            'fetch_mode' => in_array((string)($strip['fetch_mode'] ?? 'auto'), ['auto', 'upload', 'url'], true)
+                ? (string)$strip['fetch_mode']
+                : 'auto',
+            'image_url' => trim((string)($strip['image_url'] ?? '')),
         ];
     }
 
@@ -500,14 +504,177 @@ function process_uploaded_image(string $tmpFile, string $outFile): void
     ob_end_clean();
 }
 
+function comics_metadata_path(): string
+{
+    return HTDOCS_DIR . '/comics/metadata.json';
+}
+
+function comics_image_path(string $slug): string
+{
+    return HTDOCS_DIR . '/comics/' . $slug . '.jpg';
+}
+
+function comics_sanitize_slug(string $slug): string
+{
+    $slug = strtolower(trim($slug));
+    if (!preg_match('/^[a-z0-9][a-z0-9\-]*$/', $slug)) {
+        fail('Invalid comic slug');
+    }
+    return $slug;
+}
+
+function comics_config_payload(): array
+{
+    return read_json(module_config_path('comics')) ?? comics_defaults();
+}
+
+function comics_metadata_payload(): array
+{
+    return read_json(comics_metadata_path()) ?? ['farside' => [], 'strips' => [], 'sources' => []];
+}
+
+function comics_source_entry(array $metadata, array $strip): array
+{
+    $slug = (string)$strip['slug'];
+    $existing = $metadata['sources'][$slug] ?? [];
+    if (!is_array($existing)) {
+        $existing = [];
+    }
+
+    return array_merge($existing, [
+        'slug' => $slug,
+        'label' => (string)($strip['label'] ?? $slug),
+        'type' => (string)($strip['type'] ?? 'gocomics'),
+        'fetch_mode' => (string)($strip['fetch_mode'] ?? 'auto'),
+        'image_url' => (string)($strip['image_url'] ?? ''),
+        'file' => $slug . '.jpg',
+    ]);
+}
+
+function comics_refresh_metadata(?array $metadata = null): array
+{
+    $metadata = is_array($metadata) ? $metadata : comics_metadata_payload();
+    $config = comics_config_payload();
+    $strips = is_array($config['strips'] ?? null) ? $config['strips'] : [];
+
+    $sourceMap = [];
+    $stripRows = [];
+    foreach ($strips as $strip) {
+        if (!is_array($strip) || empty($strip['slug']) || empty($strip['type'])) {
+            continue;
+        }
+
+        $entry = comics_source_entry($metadata, $strip);
+        $path = comics_image_path((string)$strip['slug']);
+        if (!file_exists($path) && empty($entry['status'])) {
+            $entry['status'] = ($entry['fetch_mode'] ?? 'auto') === 'upload' ? 'missing' : 'missing';
+            $entry['message'] = ($entry['fetch_mode'] ?? 'auto') === 'upload'
+                ? 'Waiting for a manual strip upload'
+                : 'No strip image saved yet';
+        }
+
+        $sourceMap[(string)$strip['slug']] = $entry;
+
+        if (!file_exists($path)) {
+            continue;
+        }
+        $info = @getimagesize($path);
+        if (!$info) {
+            continue;
+        }
+        $stripRows[] = [
+            'slug' => (string)$strip['slug'],
+            'label' => (string)($strip['label'] ?? $strip['slug']),
+            'type' => (string)($strip['type'] ?? 'gocomics'),
+            'file' => basename($path),
+            'width' => $info[0],
+            'height' => $info[1],
+        ];
+    }
+
+    $metadata['sources'] = $sourceMap;
+    $metadata['strips'] = $stripRows;
+    $metadata['farside'] = is_array($metadata['farside'] ?? null) ? $metadata['farside'] : [];
+    $metadata['updated'] = date('Y-m-d');
+    $metadata['updated_at'] = gmdate('Y-m-d\TH:i:s\Z');
+    write_json(comics_metadata_path(), $metadata);
+    return $metadata;
+}
+
+function comics_mark_manual_success(string $slug, string $message): void
+{
+    $metadata = comics_metadata_payload();
+    $config = comics_config_payload();
+    $strip = null;
+    foreach (($config['strips'] ?? []) as $candidate) {
+        if (is_array($candidate) && (string)($candidate['slug'] ?? '') === $slug) {
+            $strip = $candidate;
+            break;
+        }
+    }
+    if (!$strip) {
+        fail('Unknown comic strip');
+    }
+
+    $entry = comics_source_entry($metadata, $strip);
+    $entry['status'] = ($entry['fetch_mode'] ?? 'auto') === 'auto' ? 'ok' : 'manual';
+    $entry['message'] = $message;
+    $entry['last_attempt_at'] = gmdate('Y-m-d\TH:i:s\Z');
+    $entry['last_success_at'] = gmdate('Y-m-d\TH:i:s\Z');
+    $entry['stale_since'] = null;
+    $metadata['sources'][$slug] = $entry;
+    comics_refresh_metadata($metadata);
+}
+
+function process_uploaded_image_blob(string $blob, string $outFile): void
+{
+    $tmp = tempnam(sys_get_temp_dir(), 'visionect_img_');
+    if ($tmp === false) {
+        fail('Could not create temp file', 500);
+    }
+    file_put_contents($tmp, $blob);
+    try {
+        process_uploaded_image($tmp, $outFile);
+    } finally {
+        @unlink($tmp);
+    }
+}
+
 function comics_preview_payload(): array
 {
     $metadataPath = HTDOCS_DIR . '/comics/metadata.json';
-    $metadata = read_json(HTDOCS_DIR . '/comics/metadata.json') ?? ['farside' => [], 'strips' => []];
-    $config = read_json(module_config_path('comics')) ?? comics_defaults();
+    $metadata = comics_metadata_payload();
+    $config = comics_config_payload();
+    $warnings = [];
+    $enabledMap = [];
+    foreach (($config['strips'] ?? []) as $strip) {
+        if (is_array($strip) && !empty($strip['slug'])) {
+            $enabledMap[(string)$strip['slug']] = !array_key_exists('enabled', $strip) || (bool)$strip['enabled'];
+        }
+    }
+    foreach (($metadata['sources'] ?? []) as $source) {
+        if (!is_array($source) || empty($source['slug'])) {
+            continue;
+        }
+        if (array_key_exists((string)$source['slug'], $enabledMap) && !$enabledMap[(string)$source['slug']]) {
+            continue;
+        }
+        $status = (string)($source['status'] ?? '');
+        if (!in_array($status, ['blocked', 'missing'], true)) {
+            continue;
+        }
+        $warnings[] = [
+            'slug' => (string)$source['slug'],
+            'label' => (string)($source['label'] ?? $source['slug']),
+            'message' => (string)($source['message'] ?? 'Source needs attention'),
+            'stale_since' => $source['stale_since'] ?? null,
+        ];
+    }
     return [
         'farside' => $metadata['farside'] ?? [],
         'strips' => $metadata['strips'] ?? [],
+        'sources' => $metadata['sources'] ?? [],
+        'warnings' => $warnings,
         'config' => $config,
         'updated' => $metadata['updated'] ?? null,
         'updated_at' => file_exists($metadataPath) ? gmdate('Y-m-d\TH:i:s\Z', (int)filemtime($metadataPath)) : null,
@@ -877,6 +1044,125 @@ switch ($action) {
 
     case 'comics_preview':
         respond(comics_preview_payload());
+
+    case 'comics_upload_strip':
+        if (!isset($_FILES['file'])) {
+            fail('No file uploaded');
+        }
+        $slug = comics_sanitize_slug((string)($_POST['slug'] ?? $_GET['slug'] ?? ''));
+        $file = $_FILES['file'];
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            fail('Upload failed with code ' . (string)$file['error']);
+        }
+        if (($file['size'] ?? 0) > 15 * 1024 * 1024) {
+            fail('File too large (max 15MB)');
+        }
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!in_array($mime, $allowed, true)) {
+            fail('Invalid image type');
+        }
+
+        process_uploaded_image($file['tmp_name'], comics_image_path($slug));
+        comics_mark_manual_success($slug, 'Manual strip uploaded from admin');
+        respond(['ok' => true, 'slug' => $slug, 'file' => basename(comics_image_path($slug))]);
+
+    case 'comics_import_url':
+        if ($method !== 'POST' || !is_array($body)) {
+            fail('POST JSON required');
+        }
+        $slug = comics_sanitize_slug((string)($body['slug'] ?? ''));
+        $url = trim((string)($body['url'] ?? ''));
+        if (!preg_match('/^https?:\/\//i', $url)) {
+            fail('Image URL must start with http:// or https://');
+        }
+        $result = curl_fetch($url, 30);
+        if (!$result['body'] || $result['status'] >= 400) {
+            fail('Could not fetch image URL', 502);
+        }
+        if (!@getimagesizefromstring($result['body'])) {
+            fail('URL did not return a valid image');
+        }
+
+        process_uploaded_image_blob($result['body'], comics_image_path($slug));
+        comics_mark_manual_success($slug, 'Imported strip from custom image URL');
+        respond(['ok' => true, 'slug' => $slug, 'file' => basename(comics_image_path($slug))]);
+
+    case 'comics_auth_status':
+        $authFile = '/app/config/gocomics_auth.json';
+        $auth = @json_decode(@file_get_contents($authFile), true);
+        if (!is_array($auth) || empty($auth['cookies'])) {
+            respond(['configured' => false, 'expired' => false, 'expiring_soon' => false,
+                'expires_str' => '', 'refreshed_at' => '', 'source' => '']);
+        }
+        $exp = (int)($auth['expires_at'] ?? 0);
+        $now = time();
+        $expiresStr = $exp > 0 ? gmdate('Y-m-d H:i', $exp) . ' UTC' : 'unknown';
+        respond([
+            'configured'    => true,
+            'expired'       => $exp > 0 && $exp < $now,
+            'expiring_soon' => $exp > 0 && $exp > $now && $exp < $now + 259200,
+            'expires_str'   => $expiresStr,
+            'refreshed_at'  => (string)($auth['refreshed_at'] ?? ''),
+            'source'        => (string)($auth['source'] ?? 'unknown'),
+        ]);
+
+    case 'comics_save_cookies':
+        if ($method !== 'POST' || !is_array($body)) {
+            fail('POST JSON required');
+        }
+        $raw = trim((string)($body['cookies'] ?? ''));
+        if ($raw === '') {
+            fail('No cookie data provided');
+        }
+        if (strpos($raw, 'bunny_shield') === false) {
+            fail('Cookie data must contain bunny_shield');
+        }
+        // Parse Netscape format or plain name=value pairs into a cookie header string
+        $lines = preg_split('/\r?\n/', $raw);
+        $pairs = [];
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '#') === 0) {
+                continue;
+            }
+            $cols = preg_split('/\t/', $line);
+            if (count($cols) >= 7) {
+                $name  = trim($cols[5]);
+                $value = trim($cols[6]);
+                if ($name !== '') {
+                    $pairs[] = $name . '=' . $value;
+                }
+            } elseif (strpos($line, '=') !== false) {
+                $pairs[] = $line;
+            }
+        }
+        if (empty($pairs)) {
+            fail('Could not parse cookie data. Use the Get cookies.txt Locally extension.');
+        }
+        $cookieStr = implode('; ', $pairs);
+        // Extract bunny_shield expiry from cookie value
+        $expiresAt = 0;
+        if (preg_match('/bunny_shield=([^;]+)/', $cookieStr, $m)) {
+            $parts = explode('#', $m[1]);
+            if (isset($parts[2]) && ctype_digit(trim($parts[2]))) {
+                $expiresAt = (int)trim($parts[2]);
+            }
+        }
+        $auth = [
+            'cookies'      => $cookieStr,
+            'expires_at'   => $expiresAt,
+            'refreshed_at' => gmdate('Y-m-d\\TH:i:s\\Z'),
+            'source'       => 'manual',
+        ];
+        $authFile = '/app/config/gocomics_auth.json';
+        @mkdir(dirname($authFile), 0755, true);
+        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $expiryMsg = $expiresAt > 0 ? ' Expires: ' . gmdate('Y-m-d H:i', $expiresAt) . ' UTC.' : '';
+        respond(['ok' => true, 'message' => 'Cookies saved.' . $expiryMsg]);
 
     case 'ainews_preview':
         respond(ainews_preview_payload());

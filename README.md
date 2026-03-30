@@ -170,6 +170,8 @@ The Compose stack includes:
   - Redis for Visionect Server
 - `php-apache`
   - the custom display manager app, cron runner, and websocket worker
+- `cookie-refresh`
+  - GoComics BunnyCDN bypass service (see below)
 
 Published ports:
 
@@ -244,6 +246,7 @@ The first time you visit `/admin`:
 - additional GoComics strips by URL
 - manual cron run from the admin
 - sample strips are bundled so the module renders even before live fetching works
+- **automatic GoComics cookie bypass** via the `cookie-refresh` Docker service (see below)
 
 ### Quotes
 
@@ -259,6 +262,34 @@ The first time you visit `/admin`:
 - manual generation from the admin
 - bundled sample stories and images are included so the module still displays without credentials
 - the admin preview shows title, summary, and the generated image together
+
+## GoComics Cookie Bypass (`cookie-refresh` service)
+
+GoComics is served behind BunnyCDN, which issues an Argon2id proof-of-work challenge to non-browser HTTP clients. Plain curl requests are blocked.
+
+The `cookie-refresh` Docker service solves this automatically:
+
+1. On container start and at **05:55 and 15:55 UTC** each day, it runs `docker/docker-cookie-refresh/refresh.py`
+2. The script performs the challenge handshake and receives a valid session cookie
+3. The cookie set is written to `app/config/gocomics_auth.json` (gitignored)
+4. The PHP comics cron reads `gocomics_auth.json` and injects the cookies into GoComics requests
+5. If `auth.json` is missing or expired when the PHP cron runs, it waits up to 3 minutes for the refresh service to complete
+
+The refresh runs 10 minutes before each scheduled comics cron (06:05 and 16:05 UTC) to ensure cookies are always fresh.
+
+### Manual cookie fallback
+
+If auto-refresh fails, you can paste fresh cookies manually:
+
+1. Create a free account at [gocomics.com](https://www.gocomics.com) if you don't have one
+2. Log in to your GoComics account in Chrome
+3. Install the [Get cookies.txt Locally](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) Chrome extension
+4. While logged in, click the extension → Copy All
+5. In the admin UI, open the **Comics** panel → **Cookie settings** button → paste and save
+
+A free GoComics account is sufficient — no paid subscription needed. Being logged in ensures the full cookie set is present when copying.
+
+The admin UI shows current cookie expiry status and warns when cookies are missing or expired.
 
 ## Local Automation / Home Assistant / Node-RED
 
@@ -345,7 +376,7 @@ Use that before a standard Node-RED `http request` node with:
 - Image output should remain grayscale `.jpg` for the frame.
 - Wrap Imagick work with `ob_start()` / `ob_end_clean()` to avoid corrupting logs.
 - `newspaper/cron.php` still uses an older fetch path and could use future cleanup.
-- GoComics currently serves an anti-bot challenge, so fresh GoComics pulls may fail.
+- GoComics is served behind BunnyCDN with an Argon2id proof-of-work anti-bot challenge. The `cookie-refresh` service handles this automatically. Without it, GoComics pulls will be blocked.
 - Random-content modules cannot predict the exact next asset until the real frame requests it.
 - `status.php` and runtime helpers should always read config through `/app/config`, not relative paths from `/var/www/html`.
 - the frame sleep settings belong under `General`, not `Home Assistant`; Home Assistant only controls presence pause

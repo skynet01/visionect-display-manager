@@ -702,6 +702,38 @@ document.documentElement.classList.toggle('light', savedTheme === 'light');
   </div>
 </div>
 
+<div id="comicsAuthModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onclick="if(event.target===this)closeComicsAuthModal()">
+  <div class="card flex max-h-[90vh] w-full max-w-xl flex-col rounded-3xl">
+    <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
+      <div>
+        <h2 class="text-sm font-semibold">GoComics Cookie Settings</h2>
+        <p class="text-xs text-slate-400">Manage BunnyCDN bypass cookies for GoComics.</p>
+      </div>
+      <button type="button" onclick="closeComicsAuthModal()" class="rounded-full border border-white/10 p-2 text-slate-300">
+        <i data-lucide="x" class="h-4 w-4"></i>
+      </button>
+    </div>
+    <div class="overflow-y-auto p-5 space-y-5 text-sm text-slate-300">
+      <div id="comicsAuthStatus" class="rounded-2xl border px-4 py-3 text-sm">Loading…</div>
+      <div>
+        <p class="text-xs text-slate-400 mb-1">The <code class="text-slate-300">cookie-refresh</code> service renews cookies automatically each day at 06:00 UTC. Use this only if auto-refresh has failed.</p>
+        <p class="text-xs text-slate-400 mb-3">
+          Install the <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" class="text-amber-400 underline">Get cookies.txt Locally</a>
+          Chrome extension → visit <span class="text-slate-300">gocomics.com</span> → click the extension → <em>Copy All</em> → paste below.
+        </p>
+        <label class="block text-xs text-slate-400 mb-1">Paste cookie data (write-only)</label>
+        <textarea id="comicsAuthCookiePaste" rows="6"
+          class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 font-mono text-xs text-slate-300 outline-none resize-y"
+          placeholder="Paste Netscape cookie data here (must contain bunny_shield)&#10;&#10;Current value is never displayed."></textarea>
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="submitComicsCookies()" class="rounded-2xl bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-amber-400">Save cookies</button>
+        <button type="button" onclick="closeComicsAuthModal()" class="rounded-2xl border border-white/10 px-4 py-2 text-sm">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const ADMIN_BOOT = <?php echo json_encode(['username' => $adminUsername, 'csrfToken' => $csrfToken, 'wsToken' => $websocketToken], JSON_UNESCAPED_SLASHES); ?>;
 const MODULES = ['clock', 'newspaper', 'art', 'haynesmann', 'comics', 'quotes', 'ainews'];
@@ -889,6 +921,9 @@ function buildHealthWarnings() {
   if (!state.comicsPreview?.farside?.length && !state.comicsPreview?.strips?.length) {
     warnings.push('Comics preview has no generated strips yet.');
   }
+  if ((state.comicsPreview?.warnings || []).length) {
+    warnings.push('One or more comic sources are blocked or missing and are using stale/manual strips.');
+  }
   if (!state.ainewsPreview?.stories?.length) {
     warnings.push('AiNews has no generated stories yet.');
   }
@@ -904,7 +939,7 @@ function dirtySectionForTarget(target) {
   if (target.matches?.('[data-clock-style]')) return 'clock';
   if (target.matches?.('[data-paper-style],[data-paper-prefix],[data-paper-enabled]')) return 'newspaper';
   if (target.id && target.id.startsWith('comics-gap-')) return 'comics';
-  if (target.matches?.('[data-strip-enabled]')) return 'comics';
+  if (target.matches?.('[data-strip-enabled],[data-strip-fetch-mode],[data-strip-image-url]')) return 'comics';
   if (target.matches?.('[data-source-label],[data-source-feed],[data-ainews-field]')) return 'ainews';
   if (target.id === 'newComicUrl') return 'comics';
   return null;
@@ -1796,33 +1831,69 @@ function renderGalleryPanel(module, title) {
 
 function renderComics() {
   const cfg = state.configs.comics;
-  const preview = state.comicsPreview || { farside: [], strips: [] };
-  const strips = [...(cfg.strips || [])].sort((a, b) => a.order - b.order).map(strip => `
+  const preview = state.comicsPreview || { farside: [], strips: [], sources: {}, warnings: [] };
+  const sourceMap = preview.sources || {};
+  const warnings = preview.warnings || [];
+  const strips = [...(cfg.strips || [])].sort((a, b) => a.order - b.order).map(strip => {
+    const source = sourceMap[strip.slug] || {};
+    const fetchMode = strip.fetch_mode || 'auto';
+    const staleText = source.stale_since ? `Stale since ${formatRelativeTime(source.stale_since)}` : '';
+    const statusText = source.status ? String(source.status).replace(/^\w/, c => c.toUpperCase()) : 'Unknown';
+    return `
     <div draggable="true"
       data-strip="${strip.slug}"
       ondragstart="startStripDrag('${strip.slug}')"
       ondragover="allowStripDrop(event)"
       ondrop="dropStrip('${strip.slug}')"
-      class="strip-item flex items-center justify-between gap-3 rounded-2xl border border-white/10 px-4 py-3 cursor-move">
-      <div class="flex items-center gap-3">
-        <div class="rounded-full border border-white/10 p-2 text-slate-400">${icon(strip.type === 'hardcoded' ? 'panel-top' : strip.type === 'dilbert' ? 'newspaper' : 'grip')}</div>
-        <div>
-          <div class="font-medium">${escapeHtml(strip.label)}</div>
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">${escapeHtml(strip.type)}</div>
+      class="strip-item rounded-2xl border border-white/10 px-4 py-3 cursor-move">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="rounded-full border border-white/10 p-2 text-slate-400">${icon(strip.type === 'hardcoded' ? 'panel-top' : strip.type === 'dilbert' ? 'newspaper' : 'grip')}</div>
+          <div>
+            <div class="font-medium">${escapeHtml(strip.label)}</div>
+            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">${escapeHtml(strip.type)}</div>
+            <div class="mt-2 text-xs text-slate-400">Status: ${escapeHtml(statusText)}${source.last_success_at ? ` • Last good strip ${escapeHtml(formatRelativeTime(source.last_success_at))}` : ''}${staleText ? ` • ${escapeHtml(staleText)}` : ''}</div>
+            ${source.message ? `<div class="mt-1 text-xs ${['blocked', 'missing'].includes(source.status) ? 'text-amber-300' : 'text-slate-400'}">${escapeHtml(source.message)}</div>` : ''}
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 text-sm text-slate-300">
+            <span>Enabled</span>
+            <span class="ui-toggle">
+              <input type="checkbox" data-strip-enabled="${strip.slug}" ${strip.enabled ? 'checked' : ''}>
+              <span class="ui-toggle-track"></span>
+            </span>
+          </label>
+          ${strip.type === 'gocomics' ? `<button type="button" onclick="removeComicStrip('${strip.slug}')" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>` : ''}
         </div>
       </div>
-      <div class="flex items-center gap-3">
-        <label class="flex items-center gap-2 text-sm text-slate-300">
-          <span>Enabled</span>
-          <span class="ui-toggle">
-            <input type="checkbox" data-strip-enabled="${strip.slug}" ${strip.enabled ? 'checked' : ''}>
-            <span class="ui-toggle-track"></span>
-          </span>
-        </label>
-        ${strip.type === 'gocomics' ? `<button type="button" onclick="removeComicStrip('${strip.slug}')" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>` : ''}
-      </div>
+      ${strip.type !== 'hardcoded' ? `
+        <div class="mt-4 grid gap-3 lg:grid-cols-[180px_1fr_auto]">
+          <label class="text-xs text-slate-400">
+            <span class="mb-1 block">Source mode</span>
+            <select data-strip-fetch-mode="${strip.slug}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+              <option value="auto" ${fetchMode === 'auto' ? 'selected' : ''}>Automatic</option>
+              <option value="upload" ${fetchMode === 'upload' ? 'selected' : ''}>Manual upload</option>
+              <option value="url" ${fetchMode === 'url' ? 'selected' : ''}>Direct image URL</option>
+            </select>
+          </label>
+          <label class="text-xs text-slate-400">
+            <span class="mb-1 block">Image URL</span>
+            <input data-strip-image-url="${strip.slug}" type="text" value="${escapeHtml(strip.image_url || '')}" placeholder="https://example.com/today-strip.jpg" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+          </label>
+          <div class="flex items-end gap-2">
+            <button type="button" onclick="importComicStripUrl('${strip.slug}')" class="rounded-2xl border border-white/10 px-4 py-2 text-sm">Import URL</button>
+            <label class="rounded-2xl border border-white/10 px-4 py-2 text-sm cursor-pointer">
+              Upload strip
+              <input type="file" accept="image/*" class="hidden" onchange="uploadComicStrip('${strip.slug}', this.files)">
+            </label>
+          </div>
+        </div>
+      ` : ''}
+      ${['blocked', 'missing'].includes(source.status) ? `<div class="mt-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">This strip could not be refreshed automatically. Keep the last good strip, upload a replacement, or switch to a direct image URL.</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   el('panel-comics').innerHTML = `
     <div id="dirty-notice-comics" class="${isDirty('comics') ? '' : 'hidden'}">${dirtyNotice('comics', 'Comics changes are unsaved. Save before running cron.')}</div>
@@ -1833,8 +1904,18 @@ function renderComics() {
           <h3 class="text-sm font-semibold">Today's comics preview</h3>
           <p class="text-xs text-slate-400">${preview.updated_at ? `Last metadata update: ${escapeHtml(formatRelativeTime(preview.updated_at))}` : (preview.updated ? `Last metadata update: ${escapeHtml(preview.updated)}` : 'Preview uses the latest generated strip files.')}</p>
         </div>
-        <a href="/comics/" target="_blank" class="rounded-full border border-white/10 px-4 py-2 text-sm">Open full comics page</a>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="openComicsAuthModal()" class="rounded-full border border-white/10 px-4 py-2 text-sm flex items-center gap-2">
+            <i data-lucide="cookie" class="h-4 w-4"></i> Cookie settings
+          </button>
+          <a href="/comics/" target="_blank" class="rounded-full border border-white/10 px-4 py-2 text-sm">Open comics page</a>
+        </div>
       </div>
+      ${warnings.length ? `
+        <div class="mt-4 space-y-2">
+          ${warnings.map(warning => `<div class="rounded-2xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">${escapeHtml(warning.label)}: ${escapeHtml(warning.message)}${warning.stale_since ? ` • stale since ${escapeHtml(formatRelativeTime(warning.stale_since))}` : ''}</div>`).join('')}
+        </div>
+      ` : ''}
       <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(280px,360px)_1fr]">
         <div class="overflow-hidden rounded-[1.5rem] border border-white/10 bg-white" style="${framePreviewStyle()}">
           <iframe src="/comics/?preview=${state.previewVersion}" class="h-full w-full border-0"></iframe>
@@ -1857,7 +1938,7 @@ function renderComics() {
               <div style="aspect-ratio:${strip.width || 16}/${strip.height || 7}" class="overflow-hidden bg-white">
                 <img src="/comics/${encodeURIComponent(strip.file)}?v=${state.previewVersion}" class="h-full w-full object-contain bg-white" alt="">
               </div>
-              <div class="px-3 py-2 text-[11px] text-slate-400">${escapeHtml(strip.file)}</div>
+              <div class="px-3 py-2 text-[11px] text-slate-400">${escapeHtml(strip.label || strip.file)}</div>
             </div>
           `).join('')}
         </div>
@@ -1882,7 +1963,7 @@ function renderComics() {
     </div>
     <div class="card rounded-[2rem] p-5">
       <h3 class="text-sm font-semibold">Strips</h3>
-      <p class="mt-1 text-xs text-slate-400">Drag any strip to reorder it. Paste a GoComics URL below to add another strip.</p>
+      <p class="mt-1 text-xs text-slate-400">Drag any strip to reorder it. Use automatic fetch, a manual upload, or a direct image URL for each strip.</p>
       <div class="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
         <input id="newComicUrl" type="text" placeholder="https://www.gocomics.com/garfield" class="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
         <button type="button" onclick="addComicStripFromUrl()" class="rounded-2xl border border-white/10 px-4 py-2 text-sm">Add GoComics strip</button>
@@ -2657,6 +2738,8 @@ async function saveComics() {
   state.configs.comics.strips = state.configs.comics.strips.map(strip => ({
     ...strip,
     enabled: !!document.querySelector(`[data-strip-enabled="${strip.slug}"]`)?.checked,
+    fetch_mode: document.querySelector(`[data-strip-fetch-mode="${strip.slug}"]`)?.value || strip.fetch_mode || 'auto',
+    image_url: document.querySelector(`[data-strip-image-url="${strip.slug}"]`)?.value?.trim() || '',
   }));
   await savePrefs(true);
   await api('module_config', {
@@ -2668,6 +2751,23 @@ async function saveComics() {
   clearDirty('comics');
   renderComics();
   toast('Comics settings saved');
+}
+
+async function persistComicsModuleConfig() {
+  state.configs.comics.gap_strip = Number(el('comics-gap-strip')?.value || state.configs.comics.gap_strip || 0);
+  state.configs.comics.gap_min = Number(el('comics-gap-min')?.value || state.configs.comics.gap_min || 0);
+  state.configs.comics.gap_max = Number(el('comics-gap-max')?.value || state.configs.comics.gap_max || 0);
+  state.configs.comics.strips = state.configs.comics.strips.map(strip => ({
+    ...strip,
+    enabled: !!document.querySelector(`[data-strip-enabled="${strip.slug}"]`)?.checked,
+    fetch_mode: document.querySelector(`[data-strip-fetch-mode="${strip.slug}"]`)?.value || strip.fetch_mode || 'auto',
+    image_url: document.querySelector(`[data-strip-image-url="${strip.slug}"]`)?.value?.trim() || '',
+  }));
+  await api('module_config', {
+    method: 'POST',
+    query: 'module=comics',
+    body: state.configs.comics,
+  });
 }
 
 function addSource() {
@@ -2817,6 +2917,8 @@ function addComicStripFromUrl() {
     type: 'gocomics',
     enabled: true,
     order: state.configs.comics.strips.length + 1,
+    fetch_mode: 'auto',
+    image_url: '',
   });
   el('newComicUrl').value = '';
   markDirty('comics');
@@ -2829,6 +2931,67 @@ function removeComicStrip(slug) {
     .map((strip, index) => ({ ...strip, order: index + 1 }));
   markDirty('comics');
   renderComics();
+}
+
+async function uploadComicStrip(slug, files) {
+  const file = files?.[0];
+  if (!file) return;
+  try {
+    const formData = new FormData();
+    formData.append('slug', slug);
+    formData.append('file', file);
+    const response = await fetch(`api.php?action=comics_upload_strip`, {
+      method: 'POST',
+      headers: {
+        'X-CSRF-Token': ADMIN_BOOT.csrfToken,
+      },
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) {
+      throw new Error(data.error || `Upload failed for ${file.name}`);
+    }
+    const strip = state.configs.comics.strips.find(item => item.slug === slug);
+    if (strip) {
+      strip.fetch_mode = 'upload';
+      strip.image_url = '';
+    }
+    await persistComicsModuleConfig();
+    await loadComicsPreview();
+    clearDirty('comics');
+    state.previewVersion = Date.now();
+    renderComics();
+    toast('Comic strip uploaded');
+  } catch (error) {
+    toast(error.message || 'Comic upload failed', 'error');
+  }
+}
+
+async function importComicStripUrl(slug) {
+  const url = document.querySelector(`[data-strip-image-url="${slug}"]`)?.value?.trim() || '';
+  if (!/^https?:\/\//i.test(url)) {
+    toast('Paste a full image URL', 'error');
+    return;
+  }
+  try {
+    const strip = state.configs.comics.strips.find(item => item.slug === slug);
+    if (strip) {
+      strip.fetch_mode = 'url';
+      strip.image_url = url;
+    }
+    await persistComicsModuleConfig();
+    await api('comics_import_url', {
+      method: 'POST',
+      body: { slug, url },
+    });
+    await loadComicsPreview();
+    clearDirty('comics');
+    state.previewVersion = Date.now();
+    renderComics();
+    toast('Comic strip imported from URL');
+  } catch (error) {
+    toast(error.message || 'Comic URL import failed', 'error');
+  }
 }
 
 async function openPaperModal() {
@@ -2862,6 +3025,52 @@ async function openPaperModal() {
 function closePaperModal() {
   el('paperModal').classList.add('hidden');
   el('paperModal').classList.remove('flex');
+}
+
+async function openComicsAuthModal() {
+  el('comicsAuthModal').classList.remove('hidden');
+  el('comicsAuthModal').classList.add('flex');
+  el('comicsAuthCookiePaste').value = '';
+  lucide.createIcons();
+  try {
+    const data = await api('comics_auth_status');
+    let cls, msg;
+    if (!data.configured) {
+      cls = 'border-rose-500/40 bg-rose-500/10 text-rose-200';
+      msg = 'GoComics cookies not configured. Strips will be blocked.';
+    } else if (data.expired) {
+      cls = 'border-rose-500/40 bg-rose-500/10 text-rose-200';
+      msg = `Cookies expired ${data.expires_str}. Paste fresh cookies below.`;
+    } else if (data.expiring_soon) {
+      cls = 'border-amber-400/40 bg-amber-400/10 text-amber-200';
+      msg = `Cookies expire ${data.expires_str} (in less than 3 days). Consider refreshing. Last refreshed: ${data.refreshed_at} via ${data.source}.`;
+    } else {
+      cls = 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200';
+      msg = `Cookies valid until ${data.expires_str}. Last refreshed: ${data.refreshed_at} via ${data.source}.`;
+    }
+    el('comicsAuthStatus').className = `rounded-2xl border px-4 py-3 text-sm ${cls}`;
+    el('comicsAuthStatus').textContent = msg;
+  } catch (e) {
+    el('comicsAuthStatus').textContent = 'Could not load cookie status.';
+  }
+}
+
+function closeComicsAuthModal() {
+  el('comicsAuthModal').classList.add('hidden');
+  el('comicsAuthModal').classList.remove('flex');
+}
+
+async function submitComicsCookies() {
+  const raw = el('comicsAuthCookiePaste').value.trim();
+  if (!raw) { toast('Paste cookie data first', 'error'); return; }
+  if (!raw.includes('bunny_shield')) { toast('Cookie data must contain bunny_shield', 'error'); return; }
+  try {
+    const data = await api('comics_save_cookies', { method: 'POST', body: { cookies: raw } });
+    toast(data.message || 'Cookies saved');
+    closeComicsAuthModal();
+  } catch (e) {
+    toast(e.message || 'Failed to save cookies', 'error');
+  }
 }
 
 function addPaper(encodedName, prefix, encodedStyle) {
