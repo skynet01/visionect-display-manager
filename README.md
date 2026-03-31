@@ -211,18 +211,23 @@ The first time you visit `/admin`:
 
 ### Clock
 
-| Flip style | Word style |
-|---|---|
-| ![Clock flip](docs/screenshots/module-clock-flip.jpg) | ![Clock words](docs/screenshots/module-clock-words.jpg) |
+<table><tr>
+<td><img src="docs/screenshots/module-clock-flip.jpg" width="170"><img src="docs/screenshots/module-clock-words.jpg" width="170"></td>
+<td valign="top">
 
 - multiple styles (flip clock and word clock)
 - style enablement from the admin UI
 - frame-friendly preview cards
 - useful as a no-credentials fallback module
 
+</td>
+</tr></table>
+
 ### Newspaper
 
-![Newspaper module](docs/screenshots/module-newspaper.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-newspaper.jpg" width="350"></td>
+<td valign="top">
 
 - add papers from a scraped list
 - add papers manually by tag like `NY_NYT`
@@ -233,25 +238,40 @@ The first time you visit `/admin`:
 - server-side paper selection so runtime tracking can record the exact paper served
 - bundled sample papers are included so a fresh install can preview the module immediately
 
+</td>
+</tr></table>
+
 ### Art
 
-![Art module](docs/screenshots/module-art.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-art.jpg" width="350"></td>
+<td valign="top">
 
 - random grayscale JPG artwork
 - upload and manage images in the admin UI
 - exact frame tracking records the actual image file served to the panel
 
+</td>
+</tr></table>
+
 ### Haynesmann
 
-![Haynesmann module](docs/screenshots/module-haynesmann.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-haynesmann.jpg" width="350"></td>
+<td valign="top">
 
 - random grayscale image gallery module
 - managed like the other art-style modules
 - exact frame tracking records the actual image file served to the panel
 
+</td>
+</tr></table>
+
 ### Comics
 
-![Comics module](docs/screenshots/module-comics.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-comics.jpg" width="350"></td>
+<td valign="top">
 
 - configurable strip order
 - Far Side and Dilbert support
@@ -260,16 +280,26 @@ The first time you visit `/admin`:
 - sample strips are bundled so the module renders even before live fetching works
 - **automatic GoComics cookie bypass** via the `cookie-refresh` Docker service (see below)
 
+</td>
+</tr></table>
+
 ### Quotes
 
-![Quotes module](docs/screenshots/module-quotes.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-quotes.jpg" width="350"></td>
+<td valign="top">
 
 - random grayscale quote image gallery
 - exact frame tracking records the actual image file served to the panel
 
+</td>
+</tr></table>
+
 ### AiNews
 
-![AiNews module](docs/screenshots/module-ainews.jpg)
+<table><tr>
+<td><img src="docs/screenshots/module-ainews.jpg" width="350"></td>
+<td valign="top">
 
 - RSS aggregation
 - summary + image generation
@@ -278,6 +308,9 @@ The first time you visit `/admin`:
 - manual generation from the admin
 - bundled sample stories and images are included so the module still displays without credentials
 - the admin preview shows title, summary, and the generated image together
+
+</td>
+</tr></table>
 
 ## GoComics Cookie Bypass (`cookie-refresh` service)
 
