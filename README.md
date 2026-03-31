@@ -211,12 +211,18 @@ The first time you visit `/admin`:
 
 ### Clock
 
-- multiple styles
+| Flip style | Word style |
+|---|---|
+| ![Clock flip](docs/screenshots/module-clock-flip.jpg) | ![Clock words](docs/screenshots/module-clock-words.jpg) |
+
+- multiple styles (flip clock and word clock)
 - style enablement from the admin UI
 - frame-friendly preview cards
 - useful as a no-credentials fallback module
 
 ### Newspaper
+
+![Newspaper module](docs/screenshots/module-newspaper.jpg)
 
 - add papers from a scraped list
 - add papers manually by tag like `NY_NYT`
@@ -229,17 +235,23 @@ The first time you visit `/admin`:
 
 ### Art
 
+![Art module](docs/screenshots/module-art.jpg)
+
 - random grayscale JPG artwork
 - upload and manage images in the admin UI
 - exact frame tracking records the actual image file served to the panel
 
 ### Haynesmann
 
+![Haynesmann module](docs/screenshots/module-haynesmann.jpg)
+
 - random grayscale image gallery module
 - managed like the other art-style modules
 - exact frame tracking records the actual image file served to the panel
 
 ### Comics
+
+![Comics module](docs/screenshots/module-comics.jpg)
 
 - configurable strip order
 - Far Side and Dilbert support
@@ -250,10 +262,14 @@ The first time you visit `/admin`:
 
 ### Quotes
 
+![Quotes module](docs/screenshots/module-quotes.jpg)
+
 - random grayscale quote image gallery
 - exact frame tracking records the actual image file served to the panel
 
 ### AiNews
+
+![AiNews module](docs/screenshots/module-ainews.jpg)
 
 - RSS aggregation
 - summary + image generation

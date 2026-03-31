@@ -1839,6 +1839,11 @@ function renderComics() {
     const fetchMode = strip.fetch_mode || 'auto';
     const staleText = source.stale_since ? `Stale since ${formatRelativeTime(source.stale_since)}` : '';
     const statusText = source.status ? String(source.status).replace(/^\w/, c => c.toUpperCase()) : 'Unknown';
+    const staleSinceMs = source.stale_since ? new Date(source.stale_since).getTime() : 0;
+    const showStripWarning = ['blocked', 'missing'].includes(source.status) &&
+      strip.enabled &&
+      isModuleEnabled('comics') &&
+      (staleSinceMs > 0 ? (Date.now() - staleSinceMs) > 25 * 3600 * 1000 : true);
     return `
     <div draggable="true"
       data-strip="${strip.slug}"
@@ -1890,7 +1895,7 @@ function renderComics() {
           </div>
         </div>
       ` : ''}
-      ${['blocked', 'missing'].includes(source.status) ? `<div class="mt-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">This strip could not be refreshed automatically. Keep the last good strip, upload a replacement, or switch to a direct image URL.</div>` : ''}
+      ${showStripWarning ? `<div class="mt-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">This strip could not be refreshed automatically. Keep the last good strip, upload a replacement, or switch to a direct image URL.</div>` : ''}
     </div>
   `;
   }).join('');

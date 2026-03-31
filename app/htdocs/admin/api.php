@@ -646,12 +646,17 @@ function comics_preview_payload(): array
     $metadata = comics_metadata_payload();
     $config = comics_config_payload();
     $warnings = [];
+    $gocomicsProblems = [];
     $enabledMap = [];
     foreach (($config['strips'] ?? []) as $strip) {
         if (is_array($strip) && !empty($strip['slug'])) {
             $enabledMap[(string)$strip['slug']] = !array_key_exists('enabled', $strip) || (bool)$strip['enabled'];
         }
     }
+    $now = time();
+    // Suppress "blocked" warnings for the first 25 hours — a single failed cron run
+    // is not worth alerting on while a usable stale strip is still showing.
+    $blockedGraceSeconds = 25 * 3600;
     foreach (($metadata['sources'] ?? []) as $source) {
         if (!is_array($source) || empty($source['slug'])) {
             continue;
@@ -663,11 +668,45 @@ function comics_preview_payload(): array
         if (!in_array($status, ['blocked', 'missing'], true)) {
             continue;
         }
+        // For blocked (has stale file), skip the warning if it just started failing.
+        if ($status === 'blocked') {
+            $staleSince = isset($source['stale_since']) ? (int)strtotime((string)$source['stale_since']) : 0;
+            if ($staleSince > 0 && ($now - $staleSince) < $blockedGraceSeconds) {
+                continue;
+            }
+        }
+        // Group all GoComics issues into a single notification.
+        if (in_array((string)($source['type'] ?? ''), ['gocomics'], true)) {
+            $gocomicsProblems[] = [
+                'slug'        => (string)$source['slug'],
+                'label'       => (string)($source['label'] ?? $source['slug']),
+                'status'      => $status,
+                'stale_since' => $source['stale_since'] ?? null,
+            ];
+        } else {
+            $warnings[] = [
+                'slug'        => (string)$source['slug'],
+                'label'       => (string)($source['label'] ?? $source['slug']),
+                'message'     => (string)($source['message'] ?? 'Source needs attention'),
+                'stale_since' => $source['stale_since'] ?? null,
+            ];
+        }
+    }
+    // Emit a single grouped warning for all affected GoComics strips.
+    if (!empty($gocomicsProblems)) {
+        $names = array_column($gocomicsProblems, 'label');
+        $earliestStale = null;
+        foreach ($gocomicsProblems as $p) {
+            if (!empty($p['stale_since']) && ($earliestStale === null || $p['stale_since'] < $earliestStale)) {
+                $earliestStale = $p['stale_since'];
+            }
+        }
+        $allBlocked = array_sum(array_map(fn($p) => $p['status'] === 'blocked' ? 1 : 0, $gocomicsProblems)) === count($gocomicsProblems);
         $warnings[] = [
-            'slug' => (string)$source['slug'],
-            'label' => (string)($source['label'] ?? $source['slug']),
-            'message' => (string)($source['message'] ?? 'Source needs attention'),
-            'stale_since' => $source['stale_since'] ?? null,
+            'slug'        => 'gocomics',
+            'label'       => 'GoComics',
+            'message'     => ($allBlocked ? 'Blocked by anti-bot challenge' : 'Could not fetch') . ' (' . implode(', ', $names) . ')',
+            'stale_since' => $earliestStale,
         ];
     }
     return [
