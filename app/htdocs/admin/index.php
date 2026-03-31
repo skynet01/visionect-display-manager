@@ -504,7 +504,6 @@ document.documentElement.classList.toggle('light', savedTheme === 'light');
     height: calc(var(--frame-height, 2560) * 1px);
     transform-origin: top left;
     border: 0;
-    filter: contrast(42%) grayscale(0.15);
   }
   .dragging {
     opacity: 0.45;
@@ -785,6 +784,7 @@ const state = {
     username: ADMIN_BOOT.username,
   },
   lastFrameExactUrl: null,
+  lastFrameModule: null,
 };
 
 function frameWidth() {
@@ -1521,6 +1521,7 @@ function renderLive() {
     : 'Waiting for frame request…';
   const nextUrl = selectedModulePreviewUrl();
   state.lastFrameExactUrl = state.runtimeStatus?.frame?.exact_url || null;
+  state.lastFrameModule = state.runtimeStatus?.frame?.last_module || null;
   const liveState = liveBadgeState();
   el('panel-live').innerHTML = `
     <div class="space-y-4">
@@ -2361,8 +2362,11 @@ function updateLiveStatusUI() {
     healthNode.outerHTML = renderSystemHealthCard();
   }
   const nextExactUrl = state.runtimeStatus?.frame?.exact_url || null;
-  if (state.currentPanel === 'live' && nextExactUrl && nextExactUrl !== state.lastFrameExactUrl) {
+  const nextLastModule = state.runtimeStatus?.frame?.last_module || null;
+  const frameChanged = nextExactUrl !== state.lastFrameExactUrl || nextLastModule !== state.lastFrameModule;
+  if (state.currentPanel === 'live' && frameChanged) {
     state.lastFrameExactUrl = nextExactUrl;
+    state.lastFrameModule = nextLastModule;
     state.previewVersion = Date.now();
     const iframe = el('previewFrame');
     if (iframe) {
