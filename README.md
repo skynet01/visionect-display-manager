@@ -209,7 +209,7 @@ The first time you visit `/admin`:
 ### Clock
 
 <table><tr>
-<td><img src="docs/screenshots/module-clock-flip.jpg" width="175"><img src="docs/screenshots/module-clock-words.jpg" width="175"></td>
+<td width="350"><img src="docs/screenshots/module-clock-flip.jpg" width="175"><img src="docs/screenshots/module-clock-words.jpg" width="175"></td>
 <td valign="top">
 
 - multiple styles (flip clock and word clock)
@@ -223,7 +223,7 @@ The first time you visit `/admin`:
 ### Newspaper
 
 <table><tr>
-<td><img src="docs/screenshots/module-newspaper.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-newspaper.jpg" width="350"></td>
 <td valign="top">
 
 Donwnloads latest front page newspapers from Freedom Forum
@@ -241,7 +241,7 @@ Donwnloads latest front page newspapers from Freedom Forum
 ### Art
 
 <table><tr>
-<td><img src="docs/screenshots/module-art.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-art.jpg" width="350"></td>
 <td valign="top">
 
 Just a gallery for your art, add whatever you want. If the image is color it will still show up as grayscale
@@ -255,7 +255,7 @@ Just a gallery for your art, add whatever you want. If the image is color it wil
 ### Haynesmann
 
 <table><tr>
-<td><img src="docs/screenshots/module-haynesmann.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-haynesmann.jpg" width="350"></td>
 <td valign="top">
 
 Just another gallery, shows design of the day from Haynesmann
@@ -269,7 +269,7 @@ Just another gallery, shows design of the day from Haynesmann
 ### Comics
 
 <table><tr>
-<td><img src="docs/screenshots/module-comics.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-comics.jpg" width="350"></td>
 <td valign="top">
 
 Loads the comics primarily from gocomics.
@@ -287,7 +287,7 @@ Loads the comics primarily from gocomics.
 ### Quotes
 
 <table><tr>
-<td><img src="docs/screenshots/module-quotes.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-quotes.jpg" width="350"></td>
 <td valign="top">
 
 Essentically the same as photo gallery, I just made it for quotes for myself.
@@ -300,7 +300,7 @@ Essentically the same as photo gallery, I just made it for quotes for myself.
 ### AiNews
 
 <table><tr>
-<td><img src="docs/screenshots/module-ainews.jpg" width="350"></td>
+<td width="350"><img src="docs/screenshots/module-ainews.jpg" width="350"></td>
 <td valign="top">
 
 Give it RSS feeds and then AI summarizes the article and creates comic illustration for it. You can configure the prompt to get it how you want it or to generate something specific.
