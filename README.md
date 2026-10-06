@@ -179,6 +179,26 @@ Published ports:
 - `12345`
   - websocket runtime server used by the frame shell and admin 
 
+### Daily content refresh (host cron)
+
+Module crons (newspaper, comics, ainews) do **not** run when the container starts, so restarts are fast and never spend paid API credits. Schedule them from the host instead, for example in the root crontab:
+
+```cron
+# daily content refresh, 06:05 local time
+5 6 * * * docker exec visionect-web-content php /app/cli/cron.php --run >/dev/null 2>&1
+# optional: weekly restart for the long-running websocket worker (runs no crons)
+40 3 * * 1 docker restart visionect-web-content >/dev/null 2>&1
+```
+
+`cli/cron.php` options:
+
+- no arguments: does nothing (this is what the container runs at startup)
+- `--run`: runs every module enabled in `PREFS.json` (ainews last); modules missing from `PREFS.json` are treated as disabled
+- `--run <module>`: runs one module
+- `--dry-run`: lists what would run
+
+Exit codes and output are recorded in `app/config/runtime_status.json`. You can also use the per-module "Run now" button in `/admin`.
+
 ## First-Run Behavior
 
 The public repo does not ship an admin account or secret key.
@@ -321,13 +341,13 @@ GoComics is served behind BunnyCDN, and plain curl requests are blocked. You nee
 
 The `cookie-refresh` Docker service auto refreshes the cookie for you:
 
-1. On container start and at **05:55 and 15:55 UTC** each day, it runs `docker/docker-cookie-refresh/refresh.py`
+1. On container start and daily at **05:55 local time** (the `TZ` from `.env`), it runs `docker/docker-cookie-refresh/refresh.py`
 2. The script performs the challenge handshake and receives a valid session cookie
 3. The cookie set is written to `app/config/gocomics_auth.json` (gitignored)
 4. The PHP comics cron reads `gocomics_auth.json` and injects the cookies into GoComics requests
-5. If `auth.json` is missing or expired when the PHP cron runs, it waits up to 3 minutes for the refresh service to complete
+5. If `gocomics_auth.json` is missing or expired when the PHP cron runs, it waits up to 3 minutes for the refresh service to complete
 
-The refresh runs 10 minutes before each scheduled comics cron (06:05 and 16:05 UTC) to ensure cookies are always fresh.
+The refresh only touches cookies (it never writes comic images), and runs 10 minutes before the 06:05 daily cron suggested above. If you schedule the cron at another time, adjust `entrypoint.sh` to match.
 
 ### Manual cookie fallback
 
@@ -357,6 +377,9 @@ Supported tasks:
 - `pause`
 - `unpause`
 - `reloadPrefs`
+- `refreshActivity`
+
+Optional token: if you set a **Control token** in the admin's General settings, every request must send it as an `X-Control-Token` header or a `token=` parameter. Leave it empty to allow plain LAN GET requests.
 
 Examples:
 
@@ -422,7 +445,9 @@ Use that before a standard Node-RED `http request` node with:
 - HTTPS/network fetches should use `curl`, not plain `file_get_contents()`.
 - Image output should remain grayscale `.jpg` for the frame.
 - Wrap Imagick work with `ob_start()` / `ob_end_clean()` to avoid corrupting logs.
-- `newspaper/cron.php` still uses an older fetch path and could use future cleanup.
+- Use the shared helpers in `app/lib/`: `http.php` (curl GET/POST that report the HTTP status), `image.php` (greyscale + frame-size conversion, atomic save) and `security.php` (`visionect_write_json_atomic`, `visionect_mutate_runtime_status` for locked read-modify-write). Always `require_once` them.
+- Write files atomically (temp file + rename) so the frame and admin never read a half-written image or JSON file.
+- See `app/htdocs/VISIONECT_NOTES.md` for the full developer guide.
 - GoComics is served behind BunnyCDN with an Argon2id proof-of-work anti-bot challenge. The `cookie-refresh` service handles this automatically. Without it, GoComics pulls will be blocked.
 - `status.php` and runtime helpers should always read config through `/app/config`, not relative paths from `/var/www/html`.
 

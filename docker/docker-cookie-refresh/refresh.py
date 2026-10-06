@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """
-Solves BunnyCDN's Argon2id proof-of-work challenge for gocomics.com,
-then writes fresh cookies to /app/config/gocomics_auth.json so the
-PHP cron can use them for fetching strips.
+Solves BunnyCDN's Argon2id proof-of-work challenge for gocomics.com and saves
+the resulting cookies to gocomics_auth.json (written atomically).
 
-No browser required — pure Python.
+This service ONLY refreshes cookies. The PHP cron (htdocs/comics/cron.php)
+downloads the strips and converts them to greyscale JPGs for the frame.
+
+No browser required: pure Python.
 """
 import json
 import os
 import re
 import sys
+import tempfile
 import urllib.request
 import urllib.error
 import http.cookiejar
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 CONFIG_FILE = "/app/htdocs/comics/config.json"
-COMICS_DIR  = "/app/htdocs/comics"
 AUTH_FILE   = "/app/config/gocomics_auth.json"
 BASE_URL    = "https://www.gocomics.com"
 USER_AGENT  = (
@@ -24,6 +26,8 @@ USER_AGENT  = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/146.0.0.0 Safari/537.36"
 )
+# Expected ~256 iterations at diff=13; give up long before this could run for hours.
+POW_MAX_ITERATIONS = 20000
 
 
 def load_config() -> list:
@@ -46,15 +50,12 @@ def make_opener(cookie_jar) -> urllib.request.OpenerDirector:
     )
 
 
-def http_get(opener, url: str, extra_headers: dict = None) -> tuple[int, str]:
+def http_get(opener, url: str) -> tuple:
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
-    if extra_headers:
-        for k, v in extra_headers.items():
-            req.add_header(k, v)
     try:
         with opener.open(req, timeout=20) as resp:
             return resp.status, resp.read().decode("utf-8", errors="replace")
@@ -65,29 +66,31 @@ def http_get(opener, url: str, extra_headers: dict = None) -> tuple[int, str]:
         return 0, ""
 
 
-def solve_pow(data_pow: str) -> str:
+def solve_pow(data_pow: str):
     """
-    Solve BunnyCDN's Argon2id proof-of-work challenge.
-
+    Solve BunnyCDN's Argon2id PoW. Returns the answer as a string, or None if
+    no answer was found within POW_MAX_ITERATIONS.
     data-pow format: userkey#challenge#timestamp#signature
-    Algorithm: Argon2id(secret=challenge+str(i), salt=userkey, t=2, m=512, p=1, hashLen=32)
-    Find i where the hex digest starts with "0" and digest[1] & 0x1f == 0 (diff=13).
-    The PoW answer (i) is embedded in the bunny_shield cookie BunnyCDN issues on success.
+    Workers compute: Argon2id(pass=challenge+str(i), salt=userkey, t=2, m=512, hashLen=32, p=1)
+    Find i where hash hex passes difficulty check (diff=13, diffString="0").
     """
     from argon2.low_level import hash_secret_raw, Type
 
-    parts     = data_pow.split("#")
+    parts = data_pow.split("#")
+    if len(parts) < 2:
+        print("  [pow] Malformed data-pow", flush=True)
+        return None
     userkey   = parts[0]
     challenge = parts[1]
 
     diff       = 13
-    diff_chars = diff // 8        # = 1 → diffString = "0"
+    diff_chars = diff // 8        # = 1  -> diffString = "0"
     diff_str   = "0" * diff_chars
-    mask       = 0xff >> (((diff_chars + 1) * 8) - diff)  # = 0x1f
+    # mask: 0xff >> (((diff_chars+1)*8) - diff) = 0xff >> 3 = 0x1f
+    mask = 0xff >> (((diff_chars + 1) * 8) - diff)
 
-    print(f"  [pow] Solving (Argon2id diff={diff})...", flush=True)
-    i = 0
-    while True:
+    print(f"  [pow] Solving (Argon2id, diff={diff}, expect ~256 iterations)...", flush=True)
+    for i in range(POW_MAX_ITERATIONS):
         raw = hash_secret_raw(
             secret=(challenge + str(i)).encode(),
             salt=userkey.encode(),
@@ -101,25 +104,23 @@ def solve_pow(data_pow: str) -> str:
         if h.startswith(diff_str) and (int(h[diff_chars], 16) & mask) == 0:
             print(f"  [pow] Solved at i={i} (hash prefix: {h[:6]})", flush=True)
             return str(i)
-        i += 1
-        if i % 100 == 0:
+        if i and i % 1000 == 0:
             print(f"  [pow] Still solving... i={i}", flush=True)
 
+    print(f"  [pow] Gave up after {POW_MAX_ITERATIONS} iterations", flush=True)
+    return None
 
-def bypass_challenge(opener, cookie_jar, url: str) -> bool:
+
+def bypass_challenge(opener, url: str) -> bool:
     """
-    Fetch url, solve BunnyCDN PoW if challenged, return True once accessible.
-
-    BunnyCDN's verify-pow endpoint returns a bunny_shield cookie with Path=/
-    and a ~1h TTL. The PoW answer (i) is encoded in the cookie value so
-    BunnyCDN can verify server-side without storing state.
+    Fetch url, solve BunnyCDN PoW if challenged, return True if page is accessible.
     """
     status, html = http_get(opener, url)
     if status == 0:
         return False
 
     if "Establishing a secure connection" not in html and "bunny-shield" not in html:
-        print(f"  [challenge] No challenge detected at {url}", flush=True)
+        print(f"  [challenge] No challenge at {url}", flush=True)
         return True
 
     print("  [challenge] BunnyCDN challenge detected, solving PoW...", flush=True)
@@ -129,7 +130,10 @@ def bypass_challenge(opener, cookie_jar, url: str) -> bool:
         return False
 
     data_pow = m.group(1)
-    answer   = solve_pow(data_pow)
+    answer = solve_pow(data_pow)
+    if answer is None:
+        return False
+    pow_response = f"{data_pow}#{answer}"
 
     verify_url = f"{BASE_URL}/.bunny-shield/verify-pow"
     req = urllib.request.Request(
@@ -138,7 +142,7 @@ def bypass_challenge(opener, cookie_jar, url: str) -> bool:
         headers={
             "User-Agent": USER_AGENT,
             "Content-Type": "application/json",
-            "BunnyShield-Challenge-Response": f"{data_pow}#{answer}",
+            "BunnyShield-Challenge-Response": pow_response,
             "Origin": BASE_URL,
             "Referer": url,
         },
@@ -157,7 +161,7 @@ def bypass_challenge(opener, cookie_jar, url: str) -> bool:
         print("  [challenge] PoW submission rejected", flush=True)
         return False
 
-    status2, html2 = http_get(opener, url)
+    _, html2 = http_get(opener, url)
     if "Establishing a secure connection" in html2:
         print("  [challenge] Still challenged after PoW solve", flush=True)
         return False
@@ -166,52 +170,48 @@ def bypass_challenge(opener, cookie_jar, url: str) -> bool:
     return True
 
 
-def get_og_image(html: str) -> str | None:
-    m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html)
-    if not m:
-        m = re.search(r'og:image[^>]+content=["\']([^"\']+)["\']', html)
-    return m.group(1) if m else None
+def cookie_expiry(cookie) -> int:
+    """Expiry (unix time) of a bunny_shield* cookie, or 0 if unknown.
+
+    Older cookies were named "bunny_shield" with the expiry embedded in the
+    value (key#sig#<unix>); newer ones are e.g. "bunny_shield_id_33498" and
+    only carry a normal Set-Cookie expiry (or none, for session cookies).
+    """
+    parts = (cookie.value or "").split("#")
+    if len(parts) >= 3 and parts[2].isdigit():
+        return int(parts[2])
+    if cookie.expires:
+        return int(cookie.expires)
+    return 0
 
 
-def download_image(opener, url: str, dest: str) -> bool:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def write_json_atomic(path: str, data: dict) -> None:
+    directory = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", suffix=".tmp", dir=directory)
     try:
-        with opener.open(req, timeout=30) as resp:
-            data = resp.read()
-        if len(data) < 1000:
-            print(f"  [dl] Too small ({len(data)}b): {url}", flush=True)
-            return False
-        with open(dest, "wb") as f:
-            f.write(data)
-        print(f"  [dl] Saved {len(data)}b → {dest}", flush=True)
-        return True
-    except Exception as e:
-        print(f"  [dl] Error: {e}", flush=True)
-        return False
-
-
-def fetch_strip(opener, slug: str, out_file: str) -> bool:
-    dates = [
-        datetime.now(timezone.utc).strftime("%Y/%m/%d"),
-        (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y/%m/%d"),
-        (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y/%m/%d"),
-    ]
-    for date in dates:
-        url = f"{BASE_URL}/{slug}/{date}"
-        status, html = http_get(opener, url)
-        if status == 0:
-            continue
-        if "Establishing a secure connection" in html or "bunny-shield" in html:
-            print(f"  [fetch] Still challenged at {date} — skipping", flush=True)
-            continue
-        og = get_og_image(html)
-        if og:
-            return download_image(opener, og, out_file)
-    return False
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        # This container runs as root; give the file to the owner of the config dir (the web
+        # app's uid 1000) so the admin's manual cookie save can still overwrite it.
+        st = os.stat(directory)
+        try:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def main() -> int:
-    from argon2.low_level import hash_secret_raw, Type  # early import check
+    from argon2.low_level import hash_secret_raw, Type  # noqa: F401 (early import check)
 
     print(f"[refresh] Starting at {datetime.now(timezone.utc).isoformat()}", flush=True)
     os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
@@ -223,70 +223,59 @@ def main() -> int:
         return 1
 
     if not strips:
-        print("[refresh] No auto gocomics strips configured — writing auth only", flush=True)
-        # Still solve challenge to get fresh cookies for the PHP cron
-        strips = [{"slug": "garfield", "label": "Garfield"}]
+        print("[refresh] No auto gocomics strips in config.json", flush=True)
+        return 0
 
     cookie_jar = http.cookiejar.CookieJar()
-    opener     = make_opener(cookie_jar)
+    opener = make_opener(cookie_jar)
 
+    # Solve the challenge once using the first strip's URL (local date, like the PHP cron)
     first_slug = strips[0]["slug"]
-    warm_url   = f"{BASE_URL}/{first_slug}/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}"
-    print(f"\n[refresh] Solving BunnyCDN challenge via {warm_url}", flush=True)
-    if not bypass_challenge(opener, cookie_jar, warm_url):
+    warm_url = f"{BASE_URL}/{first_slug}/{datetime.now().strftime('%Y/%m/%d')}"
+    print(f"[refresh] Solving BunnyCDN challenge via {warm_url}", flush=True)
+    if not bypass_challenge(opener, warm_url):
         print("[refresh] ERROR: Could not bypass challenge", file=sys.stderr, flush=True)
         return 1
 
-    # Extract cookies and bunny_shield expiry
-    expires_at  = 0
+    # Cookie name is now e.g. bunny_shield_id_33498, so match by prefix.
+    expires_at = 0
     all_cookies = []
     for cookie in cookie_jar:
         all_cookies.append(f"{cookie.name}={cookie.value}")
-        if cookie.name == "bunny_shield":
-            parts = cookie.value.split("#")
-            if len(parts) >= 3 and parts[2].isdigit():
-                expires_at = int(parts[2])
-    cookie_header = "; ".join(all_cookies)
+        if cookie.name.startswith("bunny_shield"):
+            exp = cookie_expiry(cookie)
+            if exp and (expires_at == 0 or exp < expires_at):
+                expires_at = exp
+
+    if not all_cookies:
+        print("[refresh] WARNING: no cookies received; keeping the existing auth file", flush=True)
+        return 1
+
     print(f"[refresh] Cookies: {', '.join(c.split('=')[0] for c in all_cookies)}", flush=True)
+    if expires_at:
+        print(f"[refresh] bunny_shield expires at {datetime.fromtimestamp(expires_at, timezone.utc).isoformat()}", flush=True)
+    else:
+        print("[refresh] bunny_shield expiry unknown (session cookie)", flush=True)
 
-    # Fetch strips (bonus — also done by PHP cron, but nice to have fresh copies)
-    results = {}
-    for strip in strips:
-        slug  = strip["slug"]
-        label = strip.get("label", slug)
-        print(f"\n[refresh] Fetching: {label}", flush=True)
-        out = os.path.join(COMICS_DIR, f"{slug}.jpg")
-        ok  = fetch_strip(opener, slug, out)
-        results[slug] = (
-            {"ok": True,  "saved_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-            if ok else
-            {"ok": False, "reason": "og:image not found or download failed"}
-        )
-        if not ok:
-            print(f"  [refresh] FAILED: {slug}", flush=True)
-
-    # Write auth.json — PHP cron reads this for CURLOPT_COOKIE injection
     existing = {}
     if os.path.exists(AUTH_FILE):
         try:
             with open(AUTH_FILE) as f:
                 existing = json.load(f)
         except Exception:
-            pass
+            existing = {}
+    # Drop the per-strip results left by the old strip-downloading version.
+    existing.pop("strips", None)
 
     auth = {
         **existing,
-        "cookies":      cookie_header,
+        "cookies":      "; ".join(all_cookies),
         "expires_at":   expires_at,
         "refreshed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source":       "playwright",
-        "strips":       results,
+        "source":       "cookie-refresh",
     }
-    with open(AUTH_FILE, "w") as f:
-        json.dump(auth, f, indent=2)
-
-    ok_count = sum(1 for r in results.values() if r.get("ok"))
-    print(f"\n[refresh] Done: {ok_count}/{len(results)} strips saved.", flush=True)
+    write_json_atomic(AUTH_FILE, auth)
+    print(f"[refresh] Wrote {AUTH_FILE}", flush=True)
     return 0
 
 

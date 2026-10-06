@@ -136,7 +136,10 @@ if ($imageFile !== '') {
 <body>
 <div class="frame">
 
-    <div class="bg" style="background-image: url('<?= htmlspecialchars($imageFile !== '' ? $imageFile : $image) ?>')"></div>
+    <?php $bgImage = $imageFile !== '' ? $imageFile : $image; ?>
+    <?php if ($bgImage !== ''): ?>
+    <div class="bg" style="background-image: url('<?= htmlspecialchars($bgImage) ?>')"></div>
+    <?php endif; ?>
 
     <div class="overlay">
         <div class="meta">

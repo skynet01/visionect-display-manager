@@ -2,9 +2,6 @@
 <html>
 <head>
 	<title>Visionect Dynamic Display</title>
-	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
-	<meta http-equiv="Pragma" content="no-cache">
-	<meta http-equiv="Expires" content="0">
 	<style>
 	iframe {
 		display: block;
@@ -73,8 +70,9 @@
 		};
 
 		const resolveFrameUrl = url => {
-			if (!url) {
-				return 'about:blank';
+			url = typeof url === 'string' ? url.trim() : '';
+			if (!url || /^about:/i.test(url)) {
+				return null;
 			}
 			if (/^(?:https?:)?\/\//i.test(url)) {
 				return url;
@@ -83,14 +81,15 @@
 		};
 
 		const withReloadStamp = url => {
-			if (!url || url === 'about:blank') {
-				return url;
-			}
 			return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_frameReload=' + Date.now();
 		};
 
 		const navigateFrame = url => {
 			const target = resolveFrameUrl(url);
+			if (!target) {
+				// Never blank the panel: keep showing the current page.
+				return;
+			}
 			const current = iframe.getAttribute('src') || '';
 			if (current === target) {
 				iframe.setAttribute('src', withReloadStamp(target));
@@ -147,8 +146,13 @@
 				};
 
 				socket.onmessage = e => {
-					const json = JSON.parse(e.data);
-					if ('url' in json) {
+					let json;
+					try {
+						json = JSON.parse(e.data);
+					} catch (error) {
+						return;
+					}
+					if (json && typeof json === 'object' && 'url' in json) {
 						navigateFrame(json.url);
 					}
 				};

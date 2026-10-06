@@ -12,3 +12,10 @@ app/htdocs/**/*.log
 app/htdocs/**/*.tmp
 app/config/gocomics_auth.json
 **/.DS_Store
+
+# runtime/cache (2026-10-05 cleanup)
+app/config/control_queue/
+app/config/*.lock
+app/htdocs/**/.thumbs/
+app/htdocs/**/*.lock
+*.bak*

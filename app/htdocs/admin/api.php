@@ -1,27 +1,35 @@
 <?php
-$securityHelper = file_exists('/app/lib/security.php') ? '/app/lib/security.php' : __DIR__ . '/../lib/security.php';
-require_once $securityHelper;
+require_once __DIR__ . '/admin_common.php';
+$imageHelper = file_exists('/app/lib/image.php') ? '/app/lib/image.php' : __DIR__ . '/../../lib/image.php';
+require_once $imageHelper;
+$httpHelper = file_exists('/app/lib/http.php') ? '/app/lib/http.php' : __DIR__ . '/../../lib/http.php';
+require_once $httpHelper;
 visionect_session_boot();
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
 const PREFS_FILE = '/app/config/PREFS.json';
-const HA_CONFIG_FILE = '/app/config/ha_integration.json';
-const GENERAL_CONFIG_FILE = '/app/config/general_settings.json';
 const HTDOCS_DIR = '/app/htdocs';
 const GALLERY_MODULES = ['art', 'haynesmann', 'quotes'];
 const MODULES = ['clock', 'newspaper', 'art', 'haynesmann', 'comics', 'quotes', 'ainews'];
 const CRON_MODULES = ['newspaper', 'comics', 'ainews'];
+const CRON_OUTPUT_LIMIT = 8000;
 const CLOCK_STYLES = ['digital', 'analog', 'words', 'clocks', 'flip'];
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const AINEWS_SECRET_FIELDS = ['groq_api_key', 'gemini_api_key', 'pollinations_api_key', 'huggingface_api_key', 'kie_api_key'];
 const HA_SECRET_FIELDS = ['access_token'];
+const GENERAL_SECRET_FIELDS = ['control_token'];
 
 function respond(array $data, int $code = 200): void
 {
+    $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false) {
+        $code = 500;
+        $json = json_encode(['error' => 'Could not encode response: ' . json_last_error_msg()], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
     http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES);
+    echo $json;
     exit;
 }
 
@@ -95,43 +103,53 @@ function default_ha_config(): array
     ];
 }
 
-function default_general_config(): array
-{
-    return [
-        'frame_width' => 1440,
-        'frame_height' => 2560,
-        'sleep_enabled' => false,
-        'wake_time' => '08:00',
-        'sleep_time' => '23:00',
-    ];
-}
-
-function ha_config_payload(): array
+/** HA config with the token decrypted. Server-side use only; never send to the browser. */
+function ha_config_stored(): array
 {
     $config = read_json(HA_CONFIG_FILE) ?? [];
     return visionect_decrypt_fields(array_merge(default_ha_config(), is_array($config) ? $config : []), HA_SECRET_FIELDS);
 }
 
-function general_config_payload(): array
+/**
+ * Replace secret values with {set: bool} markers under 'secrets' so decrypted keys never
+ * reach the browser. Works on raw (encrypted) or decrypted configs.
+ */
+function redact_secrets(array $config, array $fields): array
 {
-    $config = read_json(GENERAL_CONFIG_FILE);
-    $raw = is_array($config) ? $config : [];
-    $general = array_merge(default_general_config(), $raw);
+    $secrets = [];
+    foreach ($fields as $field) {
+        $secrets[$field] = ['set' => trim((string)($config[$field] ?? '')) !== ''];
+        unset($config[$field]);
+    }
+    $config['secrets'] = $secrets;
+    return $config;
+}
 
-    $legacyHa = read_json(HA_CONFIG_FILE) ?? [];
-    if (is_array($legacyHa)) {
-        if (!array_key_exists('sleep_enabled', $raw) && array_key_exists('sleep_enabled', $legacyHa)) {
-            $general['sleep_enabled'] = (bool)$legacyHa['sleep_enabled'];
-        }
-        if (!array_key_exists('wake_time', $raw) && !empty($legacyHa['wake_time'])) {
-            $general['wake_time'] = (string)$legacyHa['wake_time'];
-        }
-        if (!array_key_exists('sleep_time', $raw) && !empty($legacyHa['sleep_time'])) {
-            $general['sleep_time'] = (string)$legacyHa['sleep_time'];
+/** Browser-safe HA config. */
+function ha_config_payload(): array
+{
+    return redact_secrets(ha_config_stored(), HA_SECRET_FIELDS);
+}
+
+/**
+ * Write-only secret merge: a blank incoming value keeps the stored one, a field listed in
+ * $clearList is emptied, anything else replaces it. $stored holds plain (decrypted) values.
+ */
+function merge_secret_fields(array $incoming, array $stored, array $fields, $clearList): array
+{
+    $clear = is_array($clearList) ? array_map('strval', $clearList) : [];
+    foreach ($fields as $field) {
+        $value = trim((string)($incoming[$field] ?? ''));
+        if (in_array($field, $clear, true)) {
+            $incoming[$field] = '';
+        } elseif ($value === '') {
+            $incoming[$field] = (string)($stored[$field] ?? '');
+        } else {
+            $incoming[$field] = $value;
         }
     }
-
-    return $general;
+    unset($incoming['clear_secrets'], $incoming['secrets']);
+    return $incoming;
 }
 
 function module_config_path(string $module): string
@@ -279,6 +297,9 @@ function validate_comics_config(array $config): array
         if ($slug === '' || $type === '') {
             fail("Strip {$idx} is missing slug or type");
         }
+        if (!is_valid_slug($slug)) {
+            fail("Invalid comic slug at index {$idx} (letters, numbers, _ and - only)");
+        }
         $clean[] = [
             'slug' => $slug,
             'label' => trim((string)($strip['label'] ?? ucwords(str_replace('-', ' ', $slug)))),
@@ -313,9 +334,19 @@ function validate_newspaper_config(array $config): array
         if ($prefix === '') {
             continue;
         }
+        if (!is_valid_slug($prefix)) {
+            fail("Invalid newspaper prefix '{$prefix}' (letters, numbers, _ and - only)");
+        }
+        if (!is_valid_slug((string)$name)) {
+            fail('Invalid newspaper name key (letters, numbers, _ and - only)');
+        }
+        $style = trim((string)($paper['style'] ?? 'width:99%;margin:-4.6rem 0 0 0'));
+        if (preg_match('/[<>"]/', $style)) {
+            fail("Newspaper style for {$name} contains invalid characters");
+        }
         $clean[(string)$name] = [
             'prefix' => $prefix,
-            'style' => trim((string)($paper['style'] ?? 'width:99%;margin:-4.6rem 0 0 0')),
+            'style' => $style,
             'enabled' => !array_key_exists('enabled', $paper) || (bool)$paper['enabled'],
         ];
     }
@@ -345,6 +376,7 @@ function fallback_newspapers(): array
 function validate_ainews_config(array $config): array
 {
     $clean = $config;
+    unset($clean['secrets'], $clean['clear_secrets'], $clean['provider_order_text']);
     $clean['summary_words'] = max(20, (int)($config['summary_words'] ?? 60));
     $clean['kie_model'] = trim((string)($config['kie_model'] ?? 'google/nano-banana'));
     $providers = $config['provider_order'] ?? ['kie', 'gemini', 'pollinations', 'huggingface'];
@@ -430,6 +462,11 @@ function validate_general_config(array $config): array
     if (!validate_time($sleepTime)) {
         fail('Sleep time must use HH:MM format');
     }
+    // Optional control.php token (plain here; encrypted at rest by the caller). Empty = not required.
+    $controlToken = trim((string)($config['control_token'] ?? ''));
+    if ($controlToken !== '' && (strlen($controlToken) < 8 || !preg_match('/^[\x21-\x7e]+$/', $controlToken))) {
+        fail('Control token must be at least 8 printable characters without spaces');
+    }
 
     return [
         'frame_width' => $width,
@@ -437,6 +474,7 @@ function validate_general_config(array $config): array
         'sleep_enabled' => $sleepEnabled,
         'wake_time' => $wakeTime,
         'sleep_time' => $sleepTime,
+        'control_token' => $controlToken,
     ];
 }
 
@@ -465,9 +503,15 @@ function starts_with(string $value, string $prefix): bool
     return substr($value, 0, strlen($prefix)) === $prefix;
 }
 
+function is_valid_slug(string $value): bool
+{
+    return (bool)preg_match('/^[A-Za-z0-9_-]+$/', $value);
+}
+
 function image_output_name(string $module): string
 {
-    return 'bw-' . $module . '-' . time() . '.jpg';
+    // time() alone collides when several files are uploaded within the same second.
+    return 'bw-' . $module . '-' . time() . '-' . bin2hex(random_bytes(4)) . '.jpg';
 }
 
 function list_gallery_files(string $module): array
@@ -483,25 +527,113 @@ function list_gallery_files(string $module): array
     return array_values(array_unique($files));
 }
 
-function process_uploaded_image(string $tmpFile, string $outFile): void
+/** Fails the request unless $name is an image currently listed in the module gallery. */
+function require_gallery_file(string $module, string $name): string
+{
+    if (!in_array($module, GALLERY_MODULES, true)) {
+        fail('Unknown gallery module');
+    }
+    if ($name === '' || !in_array($name, list_gallery_files($module), true)) {
+        fail('Image not found', 404);
+    }
+    return HTDOCS_DIR . '/' . $module . '/' . $name;
+}
+
+function gallery_thumb_path(string $module, string $name): string
+{
+    return HTDOCS_DIR . '/' . $module . '/.thumbs/' . $name . '.jpg';
+}
+
+/** Validate an entry from $_FILES (upload error, size, MIME). Returns the temp path. */
+function require_uploaded_image(string $field, int $maxBytes): string
+{
+    if (!isset($_FILES[$field])) {
+        fail('No file uploaded');
+    }
+    $file = $_FILES[$field];
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        fail('Upload failed with code ' . (string)($file['error'] ?? UPLOAD_ERR_NO_FILE));
+    }
+    if (($file['size'] ?? 0) > $maxBytes) {
+        fail('File too large (max ' . (int)round($maxBytes / 1048576) . 'MB)');
+    }
+    $tmp = (string)($file['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        fail('Upload failed');
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $tmp);
+    finfo_close($finfo);
+    if (!in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
+        fail('Invalid image type');
+    }
+    return $tmp;
+}
+
+/** Gallery image: greyscale, contained in the configured frame size, white letterbox. */
+function process_uploaded_image(string $src, string $outFile): void
 {
     $general = general_config_payload();
-    $targetWidth = max(1, (int)($general['frame_width'] ?? 1440));
-    $targetHeight = max(1, (int)($general['frame_height'] ?? 2560));
+    $ok = visionect_image_to_frame($src, $outFile, [
+        'mode' => 'contain',
+        'width' => max(1, (int)($general['frame_width'] ?? 1440)),
+        'height' => max(1, (int)($general['frame_height'] ?? 2560)),
+    ]);
+    if (!$ok) {
+        fail('Image processing failed: ' . (visionect_image_last_error() ?? 'unknown error'), 500);
+    }
+}
+
+/** Comic strip: greyscale, scaled down to the frame width, height kept (strips are stacked). */
+function process_comic_strip(string $src, string $outFile): void
+{
+    $general = general_config_payload();
+    $ok = visionect_image_to_frame($src, $outFile, [
+        'mode' => 'fit_width',
+        'width' => max(1, (int)($general['frame_width'] ?? 1440)),
+    ]);
+    if (!$ok) {
+        fail('Image processing failed: ' . (visionect_image_last_error() ?? 'unknown error'), 500);
+    }
+}
+
+/** Return the cached ~300px JPEG thumbnail for a gallery image, generating it if stale. */
+function gallery_thumb(string $module, string $name): string
+{
+    $src = require_gallery_file($module, $name);
+    $thumb = gallery_thumb_path($module, $name);
+    clearstatcache(true, $thumb);
+    if (is_file($thumb) && filemtime($thumb) >= filemtime($src)) {
+        return $thumb;
+    }
+
+    $blob = null;
     ob_start();
     try {
-        $img = new Imagick($tmpFile . '[0]');
-        $img->transformImageColorspace(Imagick::COLORSPACE_GRAY);
-        $img->thumbnailImage($targetWidth, $targetHeight, true, true);
+        $img = new Imagick();
+        $img->setOption('jpeg:size', '600x1100');
+        $img->readImage($src . '[0]');
+        $img->setImageBackgroundColor(new ImagickPixel('white'));
+        if ($img->getImageAlphaChannel()) {
+            $img->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
+        }
+        $img->thumbnailImage(300, 0);
+        $img->stripImage();
         $img->setImageFormat('jpeg');
-        $img->setImageCompressionQuality(92);
-        $img->writeImage($outFile);
-        $img->destroy();
+        $img->setImageCompressionQuality(75);
+        $blob = $img->getImageBlob();
+        $img->clear();
     } catch (Throwable $e) {
+        $blob = null;
+    } finally {
         ob_end_clean();
-        fail('Image processing failed: ' . $e->getMessage(), 500);
     }
-    ob_end_clean();
+
+    if (!is_string($blob) || $blob === '' || !visionect_write_file_atomic($thumb, $blob)) {
+        fail('Could not create thumbnail', 500);
+    }
+    return $thumb;
 }
 
 function comics_metadata_path(): string
@@ -516,8 +648,8 @@ function comics_image_path(string $slug): string
 
 function comics_sanitize_slug(string $slug): string
 {
-    $slug = strtolower(trim($slug));
-    if (!preg_match('/^[a-z0-9][a-z0-9\-]*$/', $slug)) {
+    $slug = trim($slug);
+    if (!is_valid_slug($slug)) {
         fail('Invalid comic slug');
     }
     return $slug;
@@ -624,20 +756,6 @@ function comics_mark_manual_success(string $slug, string $message): void
     $entry['stale_since'] = null;
     $metadata['sources'][$slug] = $entry;
     comics_refresh_metadata($metadata);
-}
-
-function process_uploaded_image_blob(string $blob, string $outFile): void
-{
-    $tmp = tempnam(sys_get_temp_dir(), 'visionect_img_');
-    if ($tmp === false) {
-        fail('Could not create temp file', 500);
-    }
-    file_put_contents($tmp, $blob);
-    try {
-        process_uploaded_image($tmp, $outFile);
-    } finally {
-        @unlink($tmp);
-    }
 }
 
 function comics_preview_payload(): array
@@ -760,28 +878,6 @@ function newspaper_preview_payload(): array
     ];
 }
 
-function curl_fetch(string $url, int $timeout = 15): array
-{
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS => 5,
-        CURLOPT_TIMEOUT => $timeout,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    ]);
-    $body = curl_exec($ch);
-    $error = curl_error($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    return [
-        'body' => $body !== false ? $body : null,
-        'error' => $error ?: null,
-        'status' => $status,
-    ];
-}
-
 function ha_fetch_state(array $config): array
 {
     $config = array_merge(default_ha_config(), $config);
@@ -894,16 +990,30 @@ function run_module_cron(string $module): array
 
     $command = 'cd ' . escapeshellarg(dirname($cronPath))
         . ' && ' . escapeshellarg(php_cli_binary()) . ' ' . escapeshellarg(basename($cronPath)) . ' 2>&1';
-    $output = shell_exec($command);
+    $lines = [];
+    $exitCode = 0;
+    exec($command, $lines, $exitCode);
+    $output = trim(implode("\n", $lines));
+    if (strlen($output) > CRON_OUTPUT_LIMIT) {
+        $output = "...\n" . substr($output, -CRON_OUTPUT_LIMIT);
+    }
+    $now = gmdate('Y-m-d\TH:i:s\Z');
+    $lastCliResult = [
+        'at' => $now,
+        'kind' => 'manual',
+        'exit_code' => $exitCode,
+        'ok' => $exitCode === 0,
+    ];
 
     visionect_update_runtime_status([
         'cron' => [
             $module => [
                 'running' => false,
-                'finished_at' => gmdate('Y-m-d\TH:i:s\Z'),
-                'last_run_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                'finished_at' => $now,
+                'last_run_at' => $now,
                 'last_run_kind' => 'manual',
-                'last_output' => trim((string)$output),
+                'last_output' => $output,
+                'last_cli_result' => $lastCliResult,
             ],
         ],
     ]);
@@ -913,10 +1023,12 @@ function run_module_cron(string $module): array
     clearstatcache();
 
     return [
-        'ok' => true,
+        'ok' => $lastCliResult['ok'],
         'module' => $module,
-        'output' => trim((string)$output),
-        'ran_at' => gmdate('Y-m-d\TH:i:s\Z'),
+        'output' => $output,
+        'ran_at' => $now,
+        'exit_code' => $exitCode,
+        'last_cli_result' => $lastCliResult,
     ];
 }
 
@@ -928,10 +1040,20 @@ visionect_require_auth_json();
 if ($method !== 'GET') {
     visionect_require_csrf_json();
 }
+if ($action !== 'account') {
+    // Only the account action writes the session; release the lock so parallel requests
+    // (thumbnails, previews) are not serialised behind each other.
+    session_write_close();
+}
 
 switch ($action) {
     case 'status':
         respond(['ok' => true, 'status' => get_status_snapshot()]);
+
+    case 'ws_token':
+        // Fresh short-lived token for each (re)connect to visionectd.
+        // role=admin: visionectd runs control tasks only for admin tokens.
+        respond(['token' => visionect_issue_websocket_token(visionect_current_username(), 3600, 'admin')]);
 
     case 'prefs':
         if ($method === 'GET') {
@@ -947,7 +1069,9 @@ switch ($action) {
                 fail('POST prefs expects JSON');
             }
             $prefs = validate_prefs_payload($body);
-            write_json(PREFS_FILE, $prefs);
+            if (!visionect_write_json_atomic(PREFS_FILE, $prefs)) {
+                fail('Could not write PREFS.json', 500);
+            }
             respond(['ok' => true]);
         }
         break;
@@ -965,7 +1089,7 @@ switch ($action) {
                 $cfg = default_module_config($module);
             }
             if ($module === 'ainews') {
-                $cfg = decrypt_ainews_config($cfg);
+                $cfg = redact_secrets($cfg, AINEWS_SECRET_FIELDS);
             }
             respond($cfg);
         }
@@ -982,56 +1106,61 @@ switch ($action) {
             } elseif ($module === 'newspaper') {
                 $body = validate_newspaper_config($body);
             } elseif ($module === 'ainews') {
+                $stored = decrypt_ainews_config(read_json($path) ?? []);
+                $body = merge_secret_fields($body, $stored, AINEWS_SECRET_FIELDS, $body['clear_secrets'] ?? []);
                 $body = validate_ainews_config($body);
                 $body = encrypt_ainews_config($body);
             }
 
-            write_json($path, $body);
+            if (!visionect_write_json_atomic($path, $body)) {
+                fail('Could not write module config', 500);
+            }
             respond(['ok' => true]);
         }
         break;
 
     case 'account':
-        if ($method === 'GET') {
-            respond(['username' => visionect_current_username()]);
+        if ($method !== 'POST') {
+            fail('POST required', 405);
+        }
+        if (!is_array($body)) {
+            fail('POST account expects JSON');
         }
 
-        if ($method === 'POST') {
-            if (!is_array($body)) {
-                fail('POST account expects JSON');
-            }
-
-            $account = visionect_account_record();
-            if (!$account) {
-                fail('Admin account is not configured', 500);
-            }
-
-            $currentPassword = (string)($body['current_password'] ?? '');
-            $username = trim((string)($body['username'] ?? visionect_current_username()));
-            $newPassword = (string)($body['new_password'] ?? '');
-
-            if ($username === '') {
-                fail('Username is required');
-            }
-            if ($currentPassword === '' || !password_verify($currentPassword, (string)($account['password_hash'] ?? ''))) {
-                fail('Current password is incorrect', 403);
-            }
-            if ($newPassword !== '' && strlen($newPassword) < 12) {
-                fail('New password must be at least 12 characters');
-            }
-
-            $next = $account;
-            $next['username'] = $username;
-            if ($newPassword !== '') {
-                $next['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
-            }
-            $next['updated_at'] = gmdate('Y-m-d\TH:i:s\Z');
-
-            write_json(VISIONECT_ADMIN_ACCOUNT_FILE, $next);
-            $_SESSION['visionect_username'] = $username;
-            respond(['ok' => true, 'username' => $username]);
+        $account = visionect_account_record();
+        if (!$account) {
+            fail('Admin account is not configured', 500);
         }
-        break;
+
+        $currentPassword = (string)($body['current_password'] ?? '');
+        $username = trim((string)($body['username'] ?? visionect_current_username()));
+        $newPassword = (string)($body['new_password'] ?? '');
+
+        if ($username === '') {
+            fail('Username is required');
+        }
+        if ($currentPassword === '' || !password_verify($currentPassword, (string)($account['password_hash'] ?? ''))) {
+            fail('Current password is incorrect', 403);
+        }
+        if ($newPassword !== '' && strlen($newPassword) < 12) {
+            fail('New password must be at least 12 characters');
+        }
+
+        $next = $account;
+        $next['username'] = $username;
+        if ($newPassword !== '') {
+            $next['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+        }
+        $next['updated_at'] = gmdate('Y-m-d\TH:i:s\Z');
+
+        $saved = visionect_with_file_lock(VISIONECT_ADMIN_ACCOUNT_FILE, function () use ($next) {
+            return visionect_write_json_atomic(VISIONECT_ADMIN_ACCOUNT_FILE, $next);
+        });
+        if (!$saved) {
+            fail('Could not save the admin account', 500);
+        }
+        $_SESSION['visionect_username'] = $username;
+        respond(['ok' => true, 'username' => $username]);
 
     case 'ha_config':
         if ($method === 'GET') {
@@ -1042,30 +1171,52 @@ switch ($action) {
             if (!is_array($body)) {
                 fail('POST ha_config expects JSON');
             }
+            $body = merge_secret_fields($body, ha_config_stored(), HA_SECRET_FIELDS, $body['clear_secrets'] ?? []);
             $config = validate_ha_config($body);
-            write_json(HA_CONFIG_FILE, encrypt_ha_config($config));
-            respond(['ok' => true, 'config' => $config]);
+            // Older installs keep the sleep window here (general_settings.json falls back to it,
+            // as does visionectd). Carry those keys over so an HA save can't reset sleep.
+            $toWrite = encrypt_ha_config($config);
+            $rawHa = read_json(HA_CONFIG_FILE) ?? [];
+            foreach (['sleep_enabled', 'wake_time', 'sleep_time'] as $legacyKey) {
+                if (array_key_exists($legacyKey, $rawHa)) {
+                    $toWrite[$legacyKey] = $rawHa[$legacyKey];
+                }
+            }
+            if (!visionect_write_json_atomic(HA_CONFIG_FILE, $toWrite)) {
+                fail('Could not write Home Assistant settings', 500);
+            }
+            respond(['ok' => true, 'config' => redact_secrets($config, HA_SECRET_FIELDS)]);
         }
         break;
 
     case 'general_config':
         if ($method === 'GET') {
-            respond(general_config_payload());
+            // control_token is write-only: the browser only gets secrets.control_token.set.
+            respond(redact_secrets(general_config_payload(), GENERAL_SECRET_FIELDS));
         }
 
         if ($method === 'POST') {
             if (!is_array($body)) {
                 fail('POST general_config expects JSON');
             }
+            $storedGeneral = visionect_decrypt_fields(general_config_payload(), GENERAL_SECRET_FIELDS);
+            $body = merge_secret_fields($body, $storedGeneral, GENERAL_SECRET_FIELDS, $body['clear_secrets'] ?? []);
             $config = validate_general_config($body);
-            write_json(GENERAL_CONFIG_FILE, $config);
-            respond(['ok' => true, 'config' => $config]);
+            if (!visionect_write_json_atomic(GENERAL_CONFIG_FILE, visionect_encrypt_fields($config, GENERAL_SECRET_FIELDS))) {
+                fail('Could not write general settings', 500);
+            }
+            respond(['ok' => true, 'config' => redact_secrets($config, GENERAL_SECRET_FIELDS)]);
         }
         break;
 
     case 'ha_status':
-        $config = ha_config_payload();
-        if ($method === 'POST' && is_array($body)) {
+        // Test connection with the (unsaved) form values; a blank token uses the stored one.
+        if ($method !== 'POST') {
+            fail('POST required', 405);
+        }
+        $config = ha_config_stored();
+        if (is_array($body)) {
+            $body = merge_secret_fields($body, $config, HA_SECRET_FIELDS, $body['clear_secrets'] ?? []);
             $config = validate_ha_config($body);
         }
         $result = ha_fetch_state($config);
@@ -1079,33 +1230,35 @@ switch ($action) {
         if (!in_array($module, GALLERY_MODULES, true)) {
             fail('Unknown gallery module');
         }
-        respond(['files' => list_gallery_files($module)]);
+        $files = [];
+        foreach (list_gallery_files($module) as $name) {
+            $files[] = ['name' => $name, 'mtime' => (int)@filemtime(HTDOCS_DIR . '/' . $module . '/' . $name)];
+        }
+        respond(['files' => $files]);
+
+    case 'thumb':
+        $module = (string)($_GET['module'] ?? '');
+        $thumb = gallery_thumb($module, (string)($_GET['file'] ?? ''));
+        header_remove('Cache-Control');
+        header_remove('Pragma');
+        header_remove('Expires');
+        header('Content-Type: image/jpeg');
+        header('Content-Length: ' . filesize($thumb));
+        // URLs carry the source mtime (?v=), so a changed image gets a new URL.
+        header('Cache-Control: private, max-age=604800');
+        readfile($thumb);
+        exit;
 
     case 'comics_preview':
         respond(comics_preview_payload());
 
     case 'comics_upload_strip':
-        if (!isset($_FILES['file'])) {
-            fail('No file uploaded');
+        if ($method !== 'POST') {
+            fail('POST required', 405);
         }
         $slug = comics_sanitize_slug((string)($_POST['slug'] ?? $_GET['slug'] ?? ''));
-        $file = $_FILES['file'];
-        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            fail('Upload failed with code ' . (string)$file['error']);
-        }
-        if (($file['size'] ?? 0) > 15 * 1024 * 1024) {
-            fail('File too large (max 15MB)');
-        }
-
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $mime = finfo_file($finfo, $file['tmp_name']);
-        finfo_close($finfo);
-        $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        if (!in_array($mime, $allowed, true)) {
-            fail('Invalid image type');
-        }
-
-        process_uploaded_image($file['tmp_name'], comics_image_path($slug));
+        $tmp = require_uploaded_image('file', 15 * 1024 * 1024);
+        process_comic_strip($tmp, comics_image_path($slug));
         comics_mark_manual_success($slug, 'Manual strip uploaded from admin');
         respond(['ok' => true, 'slug' => $slug, 'file' => basename(comics_image_path($slug))]);
 
@@ -1118,21 +1271,20 @@ switch ($action) {
         if (!preg_match('/^https?:\/\//i', $url)) {
             fail('Image URL must start with http:// or https://');
         }
-        $result = curl_fetch($url, 30);
-        if (!$result['body'] || $result['status'] >= 400) {
-            fail('Could not fetch image URL', 502);
+        $result = visionect_http_get($url, 30);
+        if (!$result['ok']) {
+            fail('Could not fetch image URL (' . $result['error'] . ')', 502);
         }
-        if (!@getimagesizefromstring($result['body'])) {
+        if (!visionect_is_image_blob($result['body'])) {
             fail('URL did not return a valid image');
         }
 
-        process_uploaded_image_blob($result['body'], comics_image_path($slug));
+        process_comic_strip($result['body'], comics_image_path($slug));
         comics_mark_manual_success($slug, 'Imported strip from custom image URL');
         respond(['ok' => true, 'slug' => $slug, 'file' => basename(comics_image_path($slug))]);
 
     case 'comics_auth_status':
-        $authFile = '/app/config/gocomics_auth.json';
-        $auth = @json_decode(@file_get_contents($authFile), true);
+        $auth = read_json('/app/config/gocomics_auth.json');
         if (!is_array($auth) || empty($auth['cookies'])) {
             respond(['configured' => false, 'expired' => false, 'expiring_soon' => false,
                 'expires_str' => '', 'refreshed_at' => '', 'source' => '']);
@@ -1160,11 +1312,16 @@ switch ($action) {
         if (strpos($raw, 'bunny_shield') === false) {
             fail('Cookie data must contain bunny_shield');
         }
-        // Parse Netscape format or plain name=value pairs into a cookie header string
+        // Parse Netscape cookies.txt or plain name=value pairs into a cookie header string.
+        // The Bunny cookie may be named bunny_shield or bunny_shield_id_<n>: match by prefix.
         $lines = preg_split('/\r?\n/', $raw);
         $pairs = [];
+        $expiresAt = 0;
         foreach ($lines as $line) {
             $line = trim($line);
+            if (strpos($line, '#HttpOnly_') === 0) {
+                $line = substr($line, strlen('#HttpOnly_'));
+            }
             if ($line === '' || strpos($line, '#') === 0) {
                 continue;
             }
@@ -1174,6 +1331,10 @@ switch ($action) {
                 $value = trim($cols[6]);
                 if ($name !== '') {
                     $pairs[] = $name . '=' . $value;
+                    $colExpiry = (int)trim($cols[4]);
+                    if (strpos($name, 'bunny_shield') === 0 && $colExpiry > 0 && $expiresAt === 0) {
+                        $expiresAt = $colExpiry;
+                    }
                 }
             } elseif (strpos($line, '=') !== false) {
                 $pairs[] = $line;
@@ -1183,12 +1344,14 @@ switch ($action) {
             fail('Could not parse cookie data. Use the Get cookies.txt Locally extension.');
         }
         $cookieStr = implode('; ', $pairs);
-        // Extract bunny_shield expiry from cookie value
-        $expiresAt = 0;
-        if (preg_match('/bunny_shield=([^;]+)/', $cookieStr, $m)) {
-            $parts = explode('#', $m[1]);
-            if (isset($parts[2]) && ctype_digit(trim($parts[2]))) {
-                $expiresAt = (int)trim($parts[2]);
+        // Prefer the expiry embedded in the bunny_shield value (<a>#<b>#<unix-expiry>...).
+        if (preg_match_all('/(?:^|;\s*)bunny_shield[A-Za-z0-9_]*=([^;]+)/', $cookieStr, $m)) {
+            foreach ($m[1] as $cookieValue) {
+                $parts = explode('#', $cookieValue);
+                if (isset($parts[2]) && ctype_digit(trim($parts[2]))) {
+                    $expiresAt = (int)trim($parts[2]);
+                    break;
+                }
             }
         }
         $auth = [
@@ -1197,9 +1360,10 @@ switch ($action) {
             'refreshed_at' => gmdate('Y-m-d\\TH:i:s\\Z'),
             'source'       => 'manual',
         ];
-        $authFile = '/app/config/gocomics_auth.json';
-        @mkdir(dirname($authFile), 0755, true);
-        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $authJson = json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($authJson === false || !visionect_write_file_atomic('/app/config/gocomics_auth.json', $authJson, 0600)) {
+            fail('Could not save cookies', 500);
+        }
         $expiryMsg = $expiresAt > 0 ? ' Expires: ' . gmdate('Y-m-d H:i', $expiresAt) . ' UTC.' : '';
         respond(['ok' => true, 'message' => 'Cookies saved.' . $expiryMsg]);
 
@@ -1217,32 +1381,16 @@ switch ($action) {
         respond(run_module_cron($module));
 
     case 'upload':
+        if ($method !== 'POST') {
+            fail('POST required', 405);
+        }
         $module = (string)($_POST['module'] ?? $_GET['module'] ?? '');
         if (!in_array($module, GALLERY_MODULES, true)) {
             fail('Unknown gallery module');
         }
-        if (!isset($_FILES['file'])) {
-            fail('No file uploaded');
-        }
-
-        $file = $_FILES['file'];
-        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            fail('Upload failed with code ' . (string)$file['error']);
-        }
-        if (($file['size'] ?? 0) > 10 * 1024 * 1024) {
-            fail('File too large (max 10MB)');
-        }
-
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $mime = finfo_file($finfo, $file['tmp_name']);
-        finfo_close($finfo);
-        $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        if (!in_array($mime, $allowed, true)) {
-            fail('Invalid image type');
-        }
-
+        $tmp = require_uploaded_image('file', 10 * 1024 * 1024);
         $outFile = HTDOCS_DIR . '/' . $module . '/' . image_output_name($module);
-        process_uploaded_image($file['tmp_name'], $outFile);
+        process_uploaded_image($tmp, $outFile);
         respond(['ok' => true, 'file' => basename($outFile)]);
 
     case 'delete_image':
@@ -1251,17 +1399,11 @@ switch ($action) {
         }
         $module = (string)($body['module'] ?? $_GET['module'] ?? '');
         $file = (string)($body['file'] ?? $_GET['file'] ?? '');
-        if (!in_array($module, GALLERY_MODULES, true)) {
-            fail('Unknown gallery module');
+        $path = require_gallery_file($module, $file);
+        if (!@unlink($path)) {
+            fail('Could not delete image', 500);
         }
-        if ($file === '' || strpos($file, '/') !== false || strpos($file, '..') !== false) {
-            fail('Invalid filename');
-        }
-        $path = HTDOCS_DIR . '/' . $module . '/' . $file;
-        if (!file_exists($path)) {
-            fail('Image not found', 404);
-        }
-        unlink($path);
+        @unlink(gallery_thumb_path($module, $file));
         respond(['ok' => true]);
 
     case 'validate_feed':
@@ -1273,9 +1415,9 @@ switch ($action) {
             fail('Feed URL must start with http or https');
         }
 
-        $result = curl_fetch($url, 15);
-        if (!$result['body'] || $result['status'] >= 400) {
-            fail('Could not fetch feed', 502);
+        $result = visionect_http_get($url, 15);
+        if (!$result['ok']) {
+            fail('Could not fetch feed (' . $result['error'] . ')', 502);
         }
 
         $xml = @simplexml_load_string($result['body']);
@@ -1286,12 +1428,9 @@ switch ($action) {
         respond(['ok' => true]);
 
     case 'newspapers':
-        $result = curl_fetch('https://www.freedomforum.org/todaysfrontpages/', 20);
-        if (!$result['body']) {
-            fail('Could not reach freedomforum.org', 502);
-        }
-
-        preg_match_all('/cdn\.freedomforum\.org\/dfp\/pdf\d+\/([A-Z0-9_]+)\.pdf/i', $result['body'], $matches);
+        $result = visionect_http_get('https://www.freedomforum.org/todaysfrontpages/', 20);
+        // freedomforum.org rate-limits (HTTP 429) at times; fall back to the built-in list below
+        preg_match_all('/cdn\.freedomforum\.org\/dfp\/pdf\d+\/([A-Z0-9_]+)\.pdf/i', $result['ok'] ? $result['body'] : '', $matches);
         $prefixes = array_values(array_unique($matches[1] ?? []));
 
         $papers = [];
@@ -1310,12 +1449,22 @@ switch ($action) {
         if (empty($papers)) {
             $papers = fallback_newspapers();
         }
+        if (empty($papers)) {
+            fail('Could not reach freedomforum.org', 502);
+        }
 
         usort($papers, fn($a, $b) => strcmp($a['name'], $b['name']));
         respond(['papers' => $papers]);
 
     case 'restart':
-        shell_exec('(sleep 1 && kill 1) > /dev/null 2>&1 &');
+        if ($method !== 'POST') {
+            fail('POST required', 405);
+        }
+        // visionectd exits cleanly; the container command chain ends and Docker's
+        // unless-stopped policy restarts the container (a few seconds of downtime).
+        if (!visionect_request_daemon_restart()) {
+            fail('The display service did not take the restart request', 503);
+        }
         respond(['ok' => true]);
 }
 

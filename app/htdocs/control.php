@@ -1,6 +1,7 @@
 <?php
-$securityHelper = file_exists('/app/lib/security.php') ? '/app/lib/security.php' : __DIR__ . '/lib/security.php';
-require_once $securityHelper;
+$libDir = file_exists('/app/lib/security.php') ? '/app/lib' : __DIR__ . '/../lib';
+require_once $libDir . '/security.php';
+require_once $libDir . '/runtime.php';
 visionect_send_no_cache_headers();
 
 header('Content-Type: application/json');
@@ -24,10 +25,20 @@ if (strpos($contentType, 'application/json') !== false) {
 }
 
 $input = array_merge($_GET, $_POST, is_array($body) ? $body : []);
+
+// Optional shared token (admin > General > control token). Empty: open to the LAN, as before.
+$providedToken = $_SERVER['HTTP_X_CONTROL_TOKEN'] ?? ($input['token'] ?? '');
+$providedToken = is_string($providedToken) ? $providedToken : '';
+if (!visionect_control_token_ok($providedToken)) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Missing or invalid control token'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 $task = trim((string)($input['task'] ?? ''));
 $page = trim((string)($input['page'] ?? ''));
 
-$allowedTasks = ['setPage', 'reloadCurrent', 'resumeSchedule', 'pause', 'unpause', 'reloadPrefs'];
+$allowedTasks = ['setPage', 'reloadCurrent', 'resumeSchedule', 'pause', 'unpause', 'reloadPrefs', 'refreshActivity'];
 if ($task === '' || !in_array($task, $allowedTasks, true)) {
     http_response_code(400);
     echo json_encode([
@@ -50,6 +61,13 @@ $queued = visionect_queue_remote_control([
     'remote_addr' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
 ]);
 
+if (empty($queued['queued'])) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Could not queue the command'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+unset($queued['queued'], $queued['queue_file']);
 echo json_encode([
     'ok' => true,
     'queued' => $queued,

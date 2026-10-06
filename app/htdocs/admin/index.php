@@ -1,10 +1,21 @@
 <?php
-$securityHelper = file_exists('/app/lib/security.php') ? '/app/lib/security.php' : __DIR__ . '/../lib/security.php';
-require_once $securityHelper;
+require_once __DIR__ . '/admin_common.php';
 visionect_session_boot();
 
 $loginError = '';
 $hasAdminAccount = visionect_has_admin_account();
+// First-run setup only when the account file is genuinely absent. A file that exists but
+// cannot be parsed must never reopen setup (anyone on the LAN could claim the admin).
+if (!$hasAdminAccount && file_exists(VISIONECT_ADMIN_ACCOUNT_FILE)) {
+  http_response_code(500);
+  header('Content-Type: text/html; charset=UTF-8');
+  echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="robots" content="noindex"><title>Display Manager error</title></head>'
+    . '<body style="font-family:system-ui,sans-serif;background:#09111a;color:#e2e8f0;padding:3rem;max-width:40rem;margin:auto">'
+    . '<h1 style="font-size:1.25rem">Admin account file is unreadable</h1>'
+    . '<p><code>config/admin_account.json</code> exists but is empty or not valid JSON, so sign-in is disabled. '
+    . 'Restore it from a backup (or delete it to run first-time setup again) on the server.</p></body></html>';
+  exit;
+}
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
   $authAction = (string)($_POST['auth_action'] ?? '');
   $csrf = (string)($_POST['_csrf'] ?? '');
@@ -37,7 +48,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $password = (string)($_POST['password'] ?? '');
     $confirmPassword = (string)($_POST['confirm_password'] ?? '');
 
-    if ($hasAdminAccount) {
+    if ($hasAdminAccount || file_exists(VISIONECT_ADMIN_ACCOUNT_FILE)) {
       $loginError = 'An admin account already exists. Sign in instead.';
     } elseif (!visionect_validate_csrf($csrf)) {
       $loginError = 'The setup form expired. Refresh and try again.';
@@ -122,24 +133,7 @@ function visionect_admin_next_wake_timestamp(array $config): ?int
 }
 
 $loginRuntimeStatus = visionect_read_runtime_status();
-$loginGeneralRaw = visionect_read_json_file('/app/config/general_settings.json') ?? [];
-$loginGeneralConfig = array_merge([
-  'frame_width' => 1440,
-  'frame_height' => 2560,
-  'sleep_enabled' => false,
-  'wake_time' => '08:00',
-  'sleep_time' => '23:00',
-], $loginGeneralRaw);
-$loginLegacyHaConfig = visionect_read_json_file('/app/config/ha_integration.json') ?? [];
-if (!array_key_exists('sleep_enabled', $loginGeneralRaw) && array_key_exists('sleep_enabled', $loginLegacyHaConfig)) {
-  $loginGeneralConfig['sleep_enabled'] = (bool)$loginLegacyHaConfig['sleep_enabled'];
-}
-if (!array_key_exists('wake_time', $loginGeneralRaw) && !empty($loginLegacyHaConfig['wake_time'])) {
-  $loginGeneralConfig['wake_time'] = (string)$loginLegacyHaConfig['wake_time'];
-}
-if (!array_key_exists('sleep_time', $loginGeneralRaw) && !empty($loginLegacyHaConfig['sleep_time'])) {
-  $loginGeneralConfig['sleep_time'] = (string)$loginLegacyHaConfig['sleep_time'];
-}
+$loginGeneralConfig = general_config_payload();
 $loginFrameWidth = max(1, (int)($loginGeneralConfig['frame_width'] ?? 1440));
 $loginFrameHeight = max(1, (int)($loginGeneralConfig['frame_height'] ?? 2560));
 $loginDisplay = is_array($loginRuntimeStatus['display'] ?? null) ? $loginRuntimeStatus['display'] : [];
@@ -176,7 +170,7 @@ $pageTitle = $hasAdminAccount ? 'Display Manager Login' : 'Display Manager Setup
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow,noarchive">
 <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="vendor/tailwindcss-play-3.4.17.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -297,7 +291,6 @@ tailwind.config = {
 }
 
 $adminUsername = visionect_current_username() ?? 'Admin';
-$websocketToken = visionect_issue_websocket_token($adminUsername);
 ?>
 <!DOCTYPE html>
 <html lang="en" class="dark">
@@ -306,8 +299,8 @@ $websocketToken = visionect_issue_websocket_token($adminUsername);
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow,noarchive">
 <title>Display Manager</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="vendor/tailwindcss-play-3.4.17.js"></script>
+<script src="vendor/lucide-1.52.0.min.js"></script>
 <script>
 tailwind.config = {
   darkMode: 'class',
@@ -734,7 +727,7 @@ document.documentElement.classList.toggle('light', savedTheme === 'light');
 </div>
 
 <script>
-const ADMIN_BOOT = <?php echo json_encode(['username' => $adminUsername, 'csrfToken' => $csrfToken, 'wsToken' => $websocketToken], JSON_UNESCAPED_SLASHES); ?>;
+const ADMIN_BOOT = <?php echo json_encode(['username' => $adminUsername, 'csrfToken' => $csrfToken], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE); ?>;
 const MODULES = ['clock', 'newspaper', 'art', 'haynesmann', 'comics', 'quotes', 'ainews'];
 const CRON_MODULES = ['newspaper', 'comics', 'ainews'];
 const NAV_ITEMS = [
@@ -785,7 +778,15 @@ const state = {
   },
   lastFrameExactUrl: null,
   lastFrameModule: null,
+  // Unsaved schedule edits live here; state.prefs.timeslots always mirrors what is saved.
+  scheduleDraft: null,
+  dirtySlots: new Set(),
+  // null = daemon sent no auth result (older visionectd), true/false = explicit result.
+  wsAuthed: null,
+  wsReconnectTimer: null,
 };
+
+const GALLERY_TITLES = { art: 'Art', haynesmann: 'Haynesmann', quotes: 'Quotes' };
 
 function frameWidth() {
   return Math.max(1, Number(state.generalConfig?.frame_width || 1440));
@@ -821,7 +822,8 @@ function escapeHtml(value) {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function icon(name, extra = 'h-4 w-4') {
@@ -838,13 +840,19 @@ function normalizeNameFromPrefix(prefix) {
 function toast(message, kind = 'success') {
   const wrap = el('toastWrap');
   const node = document.createElement('div');
-  const classes = kind === 'error'
-    ? 'border-rose-500/30 bg-rose-950/90 text-rose-100'
-    : 'border-emerald-500/30 bg-emerald-950/90 text-emerald-100';
+  const classes = {
+    error: 'border-rose-500/30 bg-rose-950/90 text-rose-100',
+    warning: 'border-amber-400/40 bg-amber-950/90 text-amber-100',
+    info: 'border-sky-500/30 bg-sky-950/90 text-sky-100',
+  }[kind] || 'border-emerald-500/30 bg-emerald-950/90 text-emerald-100';
   node.className = `toast-enter rounded-2xl border px-4 py-3 text-sm shadow-xl ${classes}`;
   node.textContent = message;
   wrap.appendChild(node);
-  setTimeout(() => node.remove(), 2800);
+  setTimeout(() => node.remove(), kind === 'success' ? 2800 : 5000);
+}
+
+function clone(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
 function markDirty(section) {
@@ -889,6 +897,7 @@ function renderDirtySections() {
     node.innerHTML = dirtyNotice(section, text);
     node.classList.toggle('hidden', !isDirty(section));
   });
+  CRON_MODULES.forEach(updateCronButton);
   if (state.currentPanel === 'live') {
     const healthNode = el('systemHealthCard');
     if (healthNode) {
@@ -935,12 +944,15 @@ function dirtySectionForTarget(target) {
   if (target.closest('[data-rotation]')) {
     return target.closest('[data-rotation]')?.dataset.rotation || null;
   }
-  if (target.id?.startsWith('slot-')) return 'schedule';
+  if (target.dataset?.slot) {
+    state.dirtySlots.add(target.dataset.slot);
+    return 'schedule';
+  }
   if (target.matches?.('[data-clock-style]')) return 'clock';
   if (target.matches?.('[data-paper-style],[data-paper-prefix],[data-paper-enabled]')) return 'newspaper';
   if (target.id && target.id.startsWith('comics-gap-')) return 'comics';
   if (target.matches?.('[data-strip-enabled],[data-strip-fetch-mode],[data-strip-image-url]')) return 'comics';
-  if (target.matches?.('[data-source-label],[data-source-feed],[data-ainews-field]')) return 'ainews';
+  if (target.matches?.('[data-source-label],[data-source-feed],[data-ainews-field],[data-ainews-secret],[data-ainews-clear]')) return 'ainews';
   if (target.id === 'newComicUrl') return 'comics';
   return null;
 }
@@ -951,12 +963,23 @@ async function api(action, { method = 'GET', body, query = '' } = {}) {
   if (method !== 'GET') {
     options.headers['X-CSRF-Token'] = ADMIN_BOOT.csrfToken;
   }
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    options.body = body; // browser sets the multipart boundary
+  } else if (body !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(body);
   }
   const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text.trim() === '' ? null : JSON.parse(text);
+  } catch (error) {
+    data = null;
+  }
+  if (!data || typeof data !== 'object') {
+    throw new Error(`Invalid server response (HTTP ${response.status})`);
+  }
   if (!response.ok || data.error) {
     throw new Error(data.error || `Request failed (${response.status})`);
   }
@@ -1056,6 +1079,15 @@ function renderHaPanel() {
             <span class="mb-1 block">Sleep time</span>
             <input id="general-sleep-time" type="text" value="${escapeHtml(state.generalConfig.sleep_time || '23:00')}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none" placeholder="23:00">
           </label>
+          <div class="text-xs text-slate-400 sm:col-span-2">
+            <span class="mb-1 block">control.php token (optional)</span>
+            <input id="general-control-token" type="password" autocomplete="new-password" value="" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none" placeholder="${state.generalConfig.secrets?.control_token?.set ? 'Saved. Leave blank to keep it' : 'Not set: control.php is open to the local network'}">
+            <span class="mt-1 block text-[11px] text-slate-500">When set, Home Assistant / Node-RED must send it as the X-Control-Token header or a token parameter.</span>
+            ${state.generalConfig.secrets?.control_token?.set ? `
+            <label class="mt-1 inline-flex items-center gap-2 text-[11px] text-slate-400">
+              <input id="general-control-token-clear" type="checkbox"> Clear the saved token
+            </label>` : ''}
+          </div>
         </div>
         <div class="mt-4 flex justify-end">
           <button type="button" onclick="saveGeneralConfig()" class="rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-amber-400">Save general settings</button>
@@ -1094,10 +1126,14 @@ function renderHaPanel() {
             <span class="mb-1 block">Timeout (sec)</span>
             <input id="ha-timeout" type="number" min="2" max="30" value="${escapeHtml(state.haConfig.timeout || 10)}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
           </label>
-          <label class="text-xs text-slate-400 sm:col-span-2">
+          <div class="text-xs text-slate-400 sm:col-span-2">
             <span class="mb-1 block">Long-lived access token</span>
-            <input id="ha-access-token" type="password" value="${escapeHtml(state.haConfig.access_token || '')}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none" placeholder="Paste Home Assistant token">
-          </label>
+            <input id="ha-access-token" type="password" autocomplete="new-password" value="" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none" placeholder="${state.haConfig.secrets?.access_token?.set ? 'Saved. Leave blank to keep it' : 'Paste Home Assistant token'}">
+            ${state.haConfig.secrets?.access_token?.set ? `
+            <label class="mt-1 inline-flex items-center gap-2 text-[11px] text-slate-400">
+              <input id="ha-access-token-clear" type="checkbox"> Clear the saved token
+            </label>` : ''}
+          </div>
         </div>
         <div class="mt-3">${status}</div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
@@ -1140,7 +1176,9 @@ function readHaForm() {
     base_url: el('ha-base-url')?.value?.trim() || '',
     entity_id: el('ha-entity-id')?.value?.trim() || '',
     home_state: el('ha-home-state')?.value?.trim() || '',
+    // Write-only: blank keeps the saved token server-side.
     access_token: el('ha-access-token')?.value || '',
+    clear_secrets: el('ha-access-token-clear')?.checked ? ['access_token'] : [],
     timeout: Number(el('ha-timeout')?.value || 10),
   };
 }
@@ -1152,6 +1190,9 @@ function readGeneralForm() {
     sleep_enabled: !!el('general-sleep-enabled')?.checked,
     wake_time: el('general-wake-time')?.value?.trim() || '',
     sleep_time: el('general-sleep-time')?.value?.trim() || '',
+    // Write-only: blank keeps the saved control token server-side.
+    control_token: el('general-control-token')?.value?.trim() || '',
+    clear_secrets: el('general-control-token-clear')?.checked ? ['control_token'] : [],
   };
 }
 
@@ -1256,10 +1297,52 @@ function logoutAdmin() {
   el('logoutForm')?.submit();
 }
 
+const PANEL_RENDERERS = {
+  live: () => renderLive(),
+  schedule: () => renderSchedule(),
+  clock: () => renderClock(),
+  newspaper: () => renderNewspaper(),
+  art: () => renderGalleryPanel('art', GALLERY_TITLES.art),
+  haynesmann: () => renderGalleryPanel('haynesmann', GALLERY_TITLES.haynesmann),
+  comics: () => renderComics(),
+  quotes: () => renderGalleryPanel('quotes', GALLERY_TITLES.quotes),
+  ainews: () => renderAiNews(),
+};
+
+// Render one panel. Panels with unsaved edits are left alone unless force is set, and
+// only the visible panel is ever rendered (hidden ones are rebuilt when shown).
+function renderPanel(panel, { force = false } = {}) {
+  const node = el(`panel-${panel}`);
+  if (!node || !PANEL_RENDERERS[panel] || !state.prefs) return;
+  if (panel !== state.currentPanel) return;
+  if (!force && isDirty(panel) && node.innerHTML.trim() !== '') return;
+  PANEL_RENDERERS[panel]();
+  lucide.createIcons();
+  setTimeout(syncPreviewScale, 0);
+}
+
+function renderCurrentPanel(options) {
+  renderPanel(state.currentPanel, options);
+}
+
+// Re-render whichever of these panels is visible (dirty ones are skipped).
+function refreshPanels(panels) {
+  if (panels.includes(state.currentPanel)) {
+    renderCurrentPanel();
+  }
+}
+
 function showPanel(panel) {
+  const previous = state.currentPanel;
   state.currentPanel = panel;
   document.querySelectorAll('.panel').forEach(node => node.classList.add('hidden'));
+  // Drop the DOM (iframes, images) of the panel we leave unless it holds unsaved edits.
+  if (previous && previous !== panel && !isDirty(previous)) {
+    const prevNode = el(`panel-${previous}`);
+    if (prevNode) prevNode.innerHTML = '';
+  }
   el(`panel-${panel}`).classList.remove('hidden');
+  renderPanel(panel);
   setTimeout(syncPreviewScale, 0);
   renderNav();
 }
@@ -1379,20 +1462,45 @@ function moduleSaveAction(module) {
   return { label: 'Save settings', handler: `saveRotationOnly('${module}')` };
 }
 
+function cronButtonInner(module) {
+  const running = !!state.runningCronModules[module];
+  return `
+    ${icon(running ? 'loader-circle' : 'play-circle')}
+    <span>${running ? 'Running…' : (isDirty(module) ? 'Save before run' : moduleCronVerb(module))}</span>
+  `;
+}
+
+// Update only the cron button of a module (no panel re-render, so edits survive).
+function updateCronButton(module) {
+  const button = el(`cron-btn-${module}`);
+  if (!button) return;
+  button.disabled = !!state.runningCronModules[module] || isDirty(module);
+  button.innerHTML = cronButtonInner(module);
+  lucide.createIcons();
+}
+
+function updateCronStatusUI(module) {
+  updateCronButton(module);
+  const healthNode = el('systemHealthCard');
+  if (healthNode) {
+    healthNode.outerHTML = renderSystemHealthCard();
+    lucide.createIcons();
+  }
+}
+
 function rotationCard(module, title, details = '', options = {}) {
   const page = pageConfig(module);
   const showDynamic = options.showDynamic !== false;
-  const cronBlockedByDirty = isDirty(module);
   const saveAction = moduleSaveAction(module);
   const cronAction = moduleSupportsCron(module)
     ? `
       <button
         type="button"
+        id="cron-btn-${module}"
         onclick="runModuleCron('${module}')"
-        ${(state.runningCronModules[module] || cronBlockedByDirty) ? 'disabled' : ''}
+        ${(state.runningCronModules[module] || isDirty(module)) ? 'disabled' : ''}
         class="inline-flex items-center gap-2 rounded-full border border-sky-500/30 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-60">
-        ${icon(state.runningCronModules[module] ? 'loader-circle' : 'play-circle')}
-        <span>${state.runningCronModules[module] ? 'Running…' : (cronBlockedByDirty ? 'Save before run' : moduleCronVerb(module))}</span>
+        ${cronButtonInner(module)}
       </button>
     `
     : '';
@@ -1461,10 +1569,35 @@ function readRotation(module) {
   state.prefs.pages[module].enabled = enabled;
 }
 
-async function savePrefs(reload = true) {
-  await api('prefs', { method: 'POST', body: state.prefs });
-  if (reload && state.socket?.readyState === WebSocket.OPEN) {
-    state.socket.send(JSON.stringify({ task: 'reloadPrefs' }));
+function socketReady() {
+  // An explicit auth failure means the daemon ignores our tasks even though the socket is open.
+  return state.socket?.readyState === WebSocket.OPEN && state.wsAuthed !== false;
+}
+
+function sendSocketTask(payload) {
+  if (!socketReady()) return false;
+  state.socket.send(JSON.stringify(payload));
+  return true;
+}
+
+// Posts the given prefs (default: the saved state.prefs, never the schedule draft).
+async function savePrefs(reload = true, prefs = state.prefs) {
+  await api('prefs', { method: 'POST', body: prefs });
+  if (reload && !sendSocketTask({ task: 'reloadPrefs' })) {
+    toast('Saved, but the display is not connected so it did not reload prefs yet.', 'warning');
+  }
+}
+
+function pruneDisabledFromTimeslots(prefs = state.prefs) {
+  Object.keys(prefs.timeslots || {}).forEach(slot => {
+    prefs.timeslots[slot].pages = (prefs.timeslots[slot].pages || []).filter(page => prefs.pages?.[page]?.enabled !== false);
+  });
+}
+
+function fixCurrentPageAfterToggle(module) {
+  if (state.currentPage === module && !isModuleEnabled(module)) {
+    state.currentPage = enabledModules()[0] || null;
+    state.currentUrl = state.currentPage ? state.prefs.pages[state.currentPage].url : null;
   }
 }
 
@@ -1472,14 +1605,13 @@ async function refreshModuleAfterCron(module) {
   await loadSystemStatus();
   if (module === 'newspaper') {
     await loadNewspaperPreview();
-    renderNewspaper();
   } else if (module === 'comics') {
     await loadComicsPreview();
-    renderComics();
   } else if (module === 'ainews') {
     await loadAiNewsPreview();
-    renderAiNews();
   }
+  state.previewVersion = Date.now();
+  refreshPanels([module]);
 
   if (state.currentPage === module) {
     refreshLivePreview(true);
@@ -1490,13 +1622,23 @@ async function refreshModuleAfterCron(module) {
 async function runModuleCron(module) {
   if (!moduleSupportsCron(module) || state.runningCronModules[module]) return;
   state.runningCronModules[module] = true;
-  renderAll();
+  updateCronStatusUI(module);
+  toast(`Running ${module} update…`, 'info');
   try {
     const result = await api('run_module_cron', {
       method: 'POST',
       query: `module=${encodeURIComponent(module)}`,
       body: { module },
     });
+    if (!result.ok) {
+      const exitCode = Number.isInteger(result.exit_code) ? result.exit_code : 'unknown';
+      try {
+        await refreshModuleAfterCron(module);
+      } catch (_) {
+        // Keep the cron failure visible even if the status refresh also fails.
+      }
+      throw new Error(`${module} cron failed with exit code ${exitCode}.`);
+    }
     await refreshModuleAfterCron(module);
     const output = String(result.output || '').trim();
     const summary = output
@@ -1507,7 +1649,7 @@ async function runModuleCron(module) {
     toast(error.message, 'error');
   } finally {
     delete state.runningCronModules[module];
-    renderAll();
+    updateCronStatusUI(module);
   }
 }
 
@@ -1588,8 +1730,18 @@ function renderLive() {
   syncGlobalPauseButton();
 }
 
+function ensureScheduleDraft() {
+  if (!state.scheduleDraft || !isDirty('schedule')) {
+    state.scheduleDraft = clone(state.prefs.timeslots || {});
+    state.dirtySlots.clear();
+  }
+  return state.scheduleDraft;
+}
+
 function renderSchedule() {
-  const cards = Object.entries(state.prefs.timeslots).map(([slot, config]) => {
+  const draft = ensureScheduleDraft();
+  const cards = Object.entries(draft).map(([slot, config]) => {
+    const slotAttr = escapeHtml(slot);
     const rangeCards = DAYS.map(day => {
       const range = (config.day_time || {})[day] || { from: '08:00', till: '10:00' };
       const enabled = !!(config.day_time || {})[day];
@@ -1608,7 +1760,7 @@ function renderSchedule() {
           <div class="font-semibold uppercase tracking-[0.2em] text-slate-300">${day}</div>
           <label class="inline-flex items-center text-[11px] text-slate-300">
             <span class="ui-toggle">
-              <input id="slot-${slot}-${day}-enabled" type="checkbox" ${enabled ? 'checked' : ''}>
+              <input id="slot-${slotAttr}-${day}-enabled" data-slot="${slotAttr}" type="checkbox" ${enabled ? 'checked' : ''}>
               <span class="ui-toggle-track"></span>
             </span>
           </label>
@@ -1616,11 +1768,11 @@ function renderSchedule() {
         <div class="mt-3 grid grid-cols-2 gap-3">
           <label>
             <span class="mb-1 block text-[10px] uppercase tracking-[0.2em] text-slate-500">From</span>
-            <input id="slot-${slot}-${day}-from" type="text" value="${escapeHtml(range.from)}" placeholder="08:45" class="w-full min-w-0 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-base text-inherit outline-none">
+            <input id="slot-${slotAttr}-${day}-from" data-slot="${slotAttr}" type="text" value="${escapeHtml(range.from)}" placeholder="08:45" class="w-full min-w-0 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-base text-inherit outline-none">
           </label>
           <label>
             <span class="mb-1 block text-[10px] uppercase tracking-[0.2em] text-slate-500">Till</span>
-            <input id="slot-${slot}-${day}-till" type="text" value="${escapeHtml(range.till)}" placeholder="11:30" class="w-full min-w-0 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-base text-inherit outline-none">
+            <input id="slot-${slotAttr}-${day}-till" data-slot="${slotAttr}" type="text" value="${escapeHtml(range.till)}" placeholder="11:30" class="w-full min-w-0 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-base text-inherit outline-none">
           </label>
         </div>
       </div>
@@ -1632,13 +1784,13 @@ function renderSchedule() {
 
     const chips = Object.keys(state.prefs.pages).map(page => {
       const enabled = isModuleEnabled(page);
-      const active = config.pages.includes(page);
+      const active = (config.pages || []).includes(page);
       const classes = !enabled
         ? 'border-white/5 bg-white/5 text-slate-600 cursor-not-allowed'
         : active
           ? 'border-amber-400/60 bg-amber-400/10 text-amber-200'
           : 'border-white/10 text-slate-400 hover:border-white/20 hover:text-white';
-      const click = enabled ? `onclick="toggleSlotPage('${slot}','${page}')"` : '';
+      const click = enabled ? `data-action="toggle-slot-page" data-slot-name="${slotAttr}" data-page="${escapeHtml(page)}"` : 'disabled';
       return `
       <button type="button" ${click}
         class="rounded-full border px-3 py-1 text-xs transition ${classes}">
@@ -1655,8 +1807,8 @@ function renderSchedule() {
             <p class="text-xs text-slate-400">Edit the active window for each day and the pages eligible in this slot.</p>
           </div>
           <div class="flex flex-wrap items-end gap-3">
-            <button type="button" onclick="removeScheduleSlot('${slot}')" class="rounded-full border border-rose-500/30 px-4 py-2 text-xs text-rose-300">Delete</button>
-            <button type="button" onclick="saveScheduleSlot('${slot}')" class="rounded-full bg-amber-500 px-4 py-2 text-xs font-medium text-slate-950 transition hover:bg-amber-400">Save slot</button>
+            <button type="button" data-action="remove-slot" data-slot-name="${slotAttr}" class="rounded-full border border-rose-500/30 px-4 py-2 text-xs text-rose-300">Delete</button>
+            <button type="button" data-action="save-slot" data-slot-name="${slotAttr}" class="rounded-full bg-amber-500 px-4 py-2 text-xs font-medium text-slate-950 transition hover:bg-amber-400">Save slot</button>
           </div>
         </div>
         <div class="mt-4">
@@ -1667,7 +1819,7 @@ function renderSchedule() {
           <div class="flex flex-wrap gap-2">${chips}</div>
           <label class="text-xs text-slate-400">
             <span class="mb-1 block">Module Duration (min)</span>
-            <input id="slot-duration-${slot}" type="number" min="1" value="${config.duration}" class="w-36 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+            <input id="slot-duration-${slotAttr}" data-slot="${slotAttr}" type="number" min="1" value="${escapeHtml(config.duration)}" class="w-36 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
           </label>
         </div>
       </div>
@@ -1744,7 +1896,7 @@ function renderNewspaper() {
               <span class="ui-toggle-track"></span>
             </span>
           </label>
-          <button type="button" onclick="removeNewspaper('${encodeURIComponent(name)}')" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>
+          <button type="button" data-action="remove-newspaper" data-name="${escapeHtml(name)}" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>
         </div>
       </div>
       <div class="mt-3 grid gap-3 lg:grid-cols-[180px_1fr]">
@@ -1770,7 +1922,7 @@ function renderNewspaper() {
           <div class="overflow-hidden rounded-3xl border border-white/10 bg-black/10">
             <div class="overflow-hidden bg-white" style="${framePreviewStyle()}">
               ${paper.file
-                ? `<img src="/newspaper/${encodeURIComponent(paper.file)}?v=${state.previewVersion}" class="h-full w-full object-contain bg-white" alt="${escapeHtml(paper.name)}">`
+                ? `<img src="/newspaper/${encodeURIComponent(paper.file)}?v=${state.previewVersion}" loading="lazy" class="h-full w-full object-contain bg-white" alt="${escapeHtml(paper.name)}">`
                 : `<div class="flex h-full items-center justify-center text-sm text-slate-400">No file yet</div>`}
             </div>
             <div class="px-3 py-2 text-xs text-slate-400">${escapeHtml(paper.name)}</div>
@@ -1792,16 +1944,28 @@ function renderNewspaper() {
   `;
 }
 
+function galleryThumbUrl(module, item) {
+  return `api.php?action=thumb&module=${encodeURIComponent(module)}&file=${encodeURIComponent(item.name)}&v=${item.mtime || 0}`;
+}
+
 function renderGalleryPanel(module, title) {
-  const files = state.galleries[module] || [];
-  const items = files.map(file => `
+  if (!state.galleries[module]) {
+    el(`panel-${module}`).innerHTML = '<div class="card rounded-[2rem] p-5 text-sm text-slate-400">Loading gallery…</div>';
+    loadGallery(module)
+      .then(() => renderPanel(module))
+      .catch(error => toast(`Could not load ${title} gallery: ${error.message}`, 'error'));
+    return;
+  }
+  const files = state.galleries[module];
+  // Grid shows ~300px cached thumbnails; the full image opens in a new tab.
+  const items = files.map(item => `
     <div class="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-      <div class="overflow-hidden bg-white/5" style="${framePreviewStyle()}">
-        <img src="/${module}/${encodeURIComponent(file)}?v=${Date.now()}" class="h-full w-full object-contain bg-white" alt="${escapeHtml(file)}">
-      </div>
+      <a href="/${module}/${encodeURIComponent(item.name)}?v=${item.mtime || 0}" target="_blank" rel="noopener" class="block overflow-hidden bg-white/5" style="${framePreviewStyle()}">
+        <img src="${galleryThumbUrl(module, item)}" loading="lazy" decoding="async" class="h-full w-full object-contain bg-white" alt="${escapeHtml(item.name)}">
+      </a>
       <div class="flex items-center justify-between gap-2 px-3 py-2">
-        <div class="min-w-0 text-[11px] text-slate-400">${escapeHtml(file)}</div>
-        <button type="button" onclick="deleteImage('${module}','${encodeURIComponent(file)}')" class="rounded-full border border-rose-500/30 px-3 py-1 text-[11px] text-rose-300">Delete</button>
+        <div class="min-w-0 truncate text-[11px] text-slate-400">${escapeHtml(item.name)}</div>
+        <button type="button" data-action="delete-image" data-module="${module}" data-file="${escapeHtml(item.name)}" class="rounded-full border border-rose-500/30 px-3 py-1 text-[11px] text-rose-300">Delete</button>
       </div>
     </div>
   `).join('') || '<p class="text-sm text-slate-400">No images found.</p>';
@@ -1821,7 +1985,7 @@ function renderGalleryPanel(module, title) {
         </div>
         <label class="rounded-full border border-white/10 px-4 py-2 text-sm cursor-pointer">
           Upload
-          <input type="file" multiple accept="image/*" class="hidden" onchange="uploadImages('${module}', this.files)">
+          <input type="file" multiple accept="image/*" class="hidden" data-upload-gallery="${module}">
         </label>
       </div>
       <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">${items}</div>
@@ -1847,10 +2011,7 @@ function renderComics() {
       (staleSinceMs > 0 ? (Date.now() - staleSinceMs) > 25 * 3600 * 1000 : true);
     return `
     <div draggable="true"
-      data-strip="${strip.slug}"
-      ondragstart="startStripDrag('${strip.slug}')"
-      ondragover="allowStripDrop(event)"
-      ondrop="dropStrip('${strip.slug}')"
+      data-strip="${escapeHtml(strip.slug)}"
       class="strip-item rounded-2xl border border-white/10 px-4 py-3 cursor-move">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex items-start gap-3">
@@ -1866,18 +2027,18 @@ function renderComics() {
           <label class="flex items-center gap-2 text-sm text-slate-300">
             <span>Enabled</span>
             <span class="ui-toggle">
-              <input type="checkbox" data-strip-enabled="${strip.slug}" ${strip.enabled ? 'checked' : ''}>
+              <input type="checkbox" data-strip-enabled="${escapeHtml(strip.slug)}" ${strip.enabled ? 'checked' : ''}>
               <span class="ui-toggle-track"></span>
             </span>
           </label>
-          ${strip.type === 'gocomics' ? `<button type="button" onclick="removeComicStrip('${strip.slug}')" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>` : ''}
+          ${strip.type === 'gocomics' ? `<button type="button" data-action="remove-strip" data-slug="${escapeHtml(strip.slug)}" class="rounded-full border border-rose-500/30 px-3 py-1 text-xs text-rose-300">Remove</button>` : ''}
         </div>
       </div>
       ${strip.type !== 'hardcoded' ? `
         <div class="mt-4 grid gap-3 lg:grid-cols-[180px_1fr_auto]">
           <label class="text-xs text-slate-400">
             <span class="mb-1 block">Source mode</span>
-            <select data-strip-fetch-mode="${strip.slug}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+            <select data-strip-fetch-mode="${escapeHtml(strip.slug)}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
               <option value="auto" ${fetchMode === 'auto' ? 'selected' : ''}>Automatic</option>
               <option value="upload" ${fetchMode === 'upload' ? 'selected' : ''}>Manual upload</option>
               <option value="url" ${fetchMode === 'url' ? 'selected' : ''}>Direct image URL</option>
@@ -1885,13 +2046,13 @@ function renderComics() {
           </label>
           <label class="text-xs text-slate-400">
             <span class="mb-1 block">Image URL</span>
-            <input data-strip-image-url="${strip.slug}" type="text" value="${escapeHtml(strip.image_url || '')}" placeholder="https://example.com/today-strip.jpg" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+            <input data-strip-image-url="${escapeHtml(strip.slug)}" type="text" value="${escapeHtml(strip.image_url || '')}" placeholder="https://example.com/today-strip.jpg" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
           </label>
           <div class="flex items-end gap-2">
-            <button type="button" onclick="importComicStripUrl('${strip.slug}')" class="rounded-2xl border border-white/10 px-4 py-2 text-sm">Import URL</button>
+            <button type="button" data-action="import-strip-url" data-slug="${escapeHtml(strip.slug)}" class="rounded-2xl border border-white/10 px-4 py-2 text-sm">Import URL</button>
             <label class="rounded-2xl border border-white/10 px-4 py-2 text-sm cursor-pointer">
               Upload strip
-              <input type="file" accept="image/*" class="hidden" onchange="uploadComicStrip('${strip.slug}', this.files)">
+              <input type="file" accept="image/*" class="hidden" data-upload-strip="${escapeHtml(strip.slug)}">
             </label>
           </div>
         </div>
@@ -1932,7 +2093,7 @@ function renderComics() {
               ${(preview.farside || []).map(panel => `
                 <div class="comics-thumb w-full max-w-[150px] overflow-hidden rounded-3xl border border-white/10 bg-white/5">
                   <div style="aspect-ratio:${panel.width || 4}/${panel.height || 3}" class="overflow-hidden bg-white">
-                    <img src="/comics/${encodeURIComponent(panel.file)}?v=${state.previewVersion}" class="h-full w-full object-contain bg-white" alt="">
+                    <img src="/comics/${encodeURIComponent(panel.file)}?v=${state.previewVersion}" loading="lazy" class="h-full w-full object-contain bg-white" alt="">
                   </div>
                   <div class="px-3 py-2 text-[11px] text-slate-400">Far Side</div>
                 </div>
@@ -1942,7 +2103,7 @@ function renderComics() {
           ${(preview.strips || []).map(strip => `
             <div class="comics-thumb overflow-hidden rounded-3xl border border-white/10 bg-white/5">
               <div style="aspect-ratio:${strip.width || 16}/${strip.height || 7}" class="overflow-hidden bg-white">
-                <img src="/comics/${encodeURIComponent(strip.file)}?v=${state.previewVersion}" class="h-full w-full object-contain bg-white" alt="">
+                <img src="/comics/${encodeURIComponent(strip.file)}?v=${state.previewVersion}" loading="lazy" class="h-full w-full object-contain bg-white" alt="">
               </div>
               <div class="px-3 py-2 text-[11px] text-slate-400">${escapeHtml(strip.label || strip.file)}</div>
             </div>
@@ -2002,12 +2163,17 @@ function renderAiNews() {
     ['pollinations_api_key', 'Pollinations'],
     ['huggingface_api_key', 'HuggingFace'],
     ['kie_api_key', 'kie.ai'],
-  ].map(([key, label]) => `
-    <label class="text-xs text-slate-400">
-      <span class="mb-1 block">${label}</span>
-      <input data-ainews-field="${key}" type="password" value="${escapeHtml(cfg[key] || '')}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
-    </label>
-  `).join('');
+  ].map(([key, label]) => {
+    // Write-only: the server only says whether a key is saved, never its value.
+    const isSet = !!cfg.secrets?.[key]?.set;
+    return `
+    <div class="text-xs text-slate-400">
+      <span class="mb-1 block">${label} <span class="${isSet ? 'text-emerald-300' : 'text-slate-500'}">(${isSet ? 'saved' : 'not set'})</span></span>
+      <input data-ainews-secret="${key}" type="password" autocomplete="new-password" value="" placeholder="${isSet ? 'Leave blank to keep the saved key' : 'Paste API key'}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none">
+      ${isSet ? `<label class="mt-1 inline-flex items-center gap-2 text-[11px]"><input type="checkbox" data-ainews-clear="${key}"> Clear saved key</label>` : ''}
+    </div>
+  `;
+  }).join('');
 
   el('panel-ainews').innerHTML = `
     <div id="dirty-notice-ainews" class="${isDirty('ainews') ? '' : 'hidden'}">${dirtyNotice('ainews', 'AiNews changes are unsaved. Save before running cron.')}</div>
@@ -2024,7 +2190,7 @@ function renderAiNews() {
         ${preview.stories.map((story, index) => `
           <div class="overflow-hidden rounded-3xl border border-white/10 bg-black/10">
             <div class="relative overflow-hidden bg-white" style="${framePreviewStyle()}">
-              <img src="/ainews/${encodeURIComponent(story.image || ('story' + (index + 1) + '.jpg'))}?v=${state.previewVersion}" class="h-full w-full object-cover" alt="${escapeHtml(story.title || '')}">
+              <img src="/ainews/${encodeURIComponent(story.image || ('story' + (index + 1) + '.jpg'))}?v=${state.previewVersion}" loading="lazy" class="h-full w-full object-cover" alt="${escapeHtml(story.title || '')}">
               <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-4 pt-16 text-white">
                 <div class="text-[10px] uppercase tracking-[0.25em] text-white/65">${escapeHtml(story.source || '')}</div>
                 <div class="mt-2 text-sm font-semibold leading-tight">${escapeHtml(story.title || 'Untitled')}</div>
@@ -2084,18 +2250,9 @@ function renderAiNews() {
   `;
 }
 
+// Full initial render. Later updates re-render only the affected (visible, non-dirty) panel.
 function renderAll() {
   applyFramePreviewMetrics();
-  renderNav();
-  renderLive();
-  renderSchedule();
-  renderClock();
-  renderNewspaper();
-  renderGalleryPanel('art', 'Art');
-  renderGalleryPanel('haynesmann', 'Haynesmann');
-  renderComics();
-  renderGalleryPanel('quotes', 'Quotes');
-  renderAiNews();
   showPanel(state.currentPanel);
   renderHaPanel();
   lucide.createIcons();
@@ -2399,15 +2556,54 @@ function scheduleFrameStatusSync() {
   }, 900);
 }
 
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  state.socket = new WebSocket(`${protocol}//${window.location.hostname}:12345/?token=${encodeURIComponent(ADMIN_BOOT.wsToken)}`);
-  state.socket.onopen = () => {
+function scheduleReconnect(delay = 5000) {
+  clearTimeout(state.wsReconnectTimer);
+  state.wsReconnectTimer = setTimeout(connectWebSocket, delay);
+}
+
+function handleSocketAuth(data) {
+  state.wsAuthed = !!data.ok && data.role === 'admin';
+  if (!state.wsAuthed) {
+    el('countdown').textContent = 'Not authorized - reconnecting';
+    try { state.socket?.close(); } catch (error) {}
+  } else {
     el('countdown').textContent = 'Connected';
     state.socket.send(JSON.stringify({ task: 'getStatus' }));
+  }
+}
+
+// Fetches a fresh token for every (re)connect; tokens expire after an hour.
+async function connectWebSocket() {
+  clearTimeout(state.wsReconnectTimer);
+  let token;
+  try {
+    token = (await api('ws_token')).token;
+  } catch (error) {
+    el('countdown').textContent = 'Reconnecting…';
+    scheduleReconnect();
+    return;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(`${protocol}//${window.location.hostname}:12345/?token=${encodeURIComponent(token)}`);
+  state.socket = socket;
+  state.wsAuthed = null;
+  socket.onopen = () => {
+    if (state.wsAuthed === false) return;
+    el('countdown').textContent = 'Connected';
+    socket.send(JSON.stringify({ task: 'getStatus' }));
   };
-  state.socket.onmessage = event => {
-    const data = JSON.parse(event.data);
+  socket.onmessage = event => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'auth') {
+      handleSocketAuth(data);
+      return;
+    }
     if (data.url) {
       state.currentUrl = data.url;
       refreshLivePreview(true);
@@ -2437,9 +2633,12 @@ function connectWebSocket() {
       updateLiveStatusUI();
     }
   };
-  state.socket.onclose = () => {
-    el('countdown').textContent = 'Reconnecting…';
-    setTimeout(connectWebSocket, 5000);
+  socket.onclose = () => {
+    if (state.socket !== socket) return;
+    if (state.wsAuthed !== false) {
+      el('countdown').textContent = 'Reconnecting…';
+    }
+    scheduleReconnect();
   };
 }
 
@@ -2449,7 +2648,7 @@ async function loadConfig(module) {
 
 async function loadGallery(module) {
   const data = await api('gallery', { query: `module=${encodeURIComponent(module)}` });
-  state.galleries[module] = data.files || [];
+  state.galleries[module] = (data.files || []).map(item => (typeof item === 'string' ? { name: item, mtime: 0 } : item));
 }
 
 async function loadComicsPreview() {
@@ -2485,9 +2684,9 @@ async function loadSystemStatus() {
 async function boot() {
   try {
     state.prefs = await api('prefs');
+    // Galleries load lazily when their panel is first shown.
     await Promise.all([
       ...MODULES.map(loadConfig),
-      ...['art', 'haynesmann', 'quotes'].map(loadGallery),
       loadComicsPreview(),
       loadAiNewsPreview(),
       loadNewspaperPreview(),
@@ -2526,9 +2725,12 @@ function toggleTheme() {
   localStorage.setItem('visionect-theme', isDark ? 'dark' : 'light');
 }
 
+function notConnectedToast() {
+  toast('Not connected to the display service. Retrying the connection…', 'error');
+}
+
 async function togglePause() {
-  if (state.socket?.readyState !== WebSocket.OPEN) return;
-  state.socket.send(JSON.stringify({ task: state.paused ? 'unpause' : 'pause' }));
+  if (!sendSocketTask({ task: state.paused ? 'unpause' : 'pause' })) notConnectedToast();
 }
 
 async function reloadCurrentPage() {
@@ -2536,8 +2738,11 @@ async function reloadCurrentPage() {
     toast(`The frame is asleep until ${nextWakeLabel()}, so reload will not reach it yet.`, 'error');
     return;
   }
-  if (state.socket?.readyState !== WebSocket.OPEN || !state.currentPage) return;
-  state.socket.send(JSON.stringify({ task: 'setPage', page: state.currentPage }));
+  if (!state.currentPage) return;
+  if (!sendSocketTask({ task: 'setPage', page: state.currentPage })) {
+    notConnectedToast();
+    return;
+  }
   refreshLivePreview(true);
   window.setTimeout(() => refreshLivePreview(true), 700);
   scheduleFrameStatusSync();
@@ -2549,13 +2754,15 @@ function goToPage() {
     return;
   }
   const page = el('pageSelect').value;
-  if (!page || state.socket?.readyState !== WebSocket.OPEN) return;
-  if (!isModuleEnabled(page)) return;
+  if (!page || !isModuleEnabled(page)) return;
+  if (!sendSocketTask({ task: 'setPage', page })) {
+    notConnectedToast();
+    return;
+  }
   state.currentPage = page;
   state.nextPage = page;
   state.currentUrl = state.prefs.pages[page].url;
   state.previewVersion = Date.now();
-  state.socket.send(JSON.stringify({ task: 'setPage', page }));
   renderLive();
   scheduleFrameStatusSync();
 }
@@ -2565,35 +2772,63 @@ function revertToSchedule() {
     toast(`The frame is asleep until ${nextWakeLabel()}, so schedule resume will apply after wake.`, 'error');
     return;
   }
-  if (state.socket?.readyState !== WebSocket.OPEN) return;
-  state.socket.send(JSON.stringify({ task: 'resumeSchedule' }));
+  if (!sendSocketTask({ task: 'resumeSchedule' })) {
+    notConnectedToast();
+    return;
+  }
   scheduleFrameStatusSync();
 }
 
 function toggleSlotPage(slot, page) {
   if (!isModuleEnabled(page)) return;
-  const pages = state.prefs.timeslots[slot].pages;
+  syncDraftFromFormLoose();
+  const draft = ensureScheduleDraft();
+  if (!draft[slot]) return;
+  const pages = draft[slot].pages || (draft[slot].pages = []);
   const idx = pages.indexOf(page);
   if (idx >= 0) {
     pages.splice(idx, 1);
   } else {
     pages.push(page);
   }
-  renderSchedule();
+  state.dirtySlots.add(slot);
+  markDirty('schedule');
+  renderPanel('schedule', { force: true });
+}
+
+// Copy a slot's form inputs into the draft (throws on invalid times).
+function syncDraftSlotFromForm(slot) {
+  const next = collectScheduleSlot(slot);
+  state.scheduleDraft[slot].day_time = next.day_time;
+  state.scheduleDraft[slot].duration = next.duration;
+}
+
+// Keep in-progress form values when the schedule panel is re-rendered from the draft.
+function syncDraftFromFormLoose() {
+  if (!state.scheduleDraft || !el('panel-schedule')?.innerHTML.trim()) return;
+  Object.keys(state.scheduleDraft).forEach(slot => {
+    try { syncDraftSlotFromForm(slot); } catch (error) { /* keep previous draft values */ }
+  });
 }
 
 async function saveScheduleSlot(slot) {
   try {
-    const next = collectScheduleSlot(slot);
-    state.prefs.timeslots[slot].day_time = next.day_time;
-    state.prefs.timeslots[slot].duration = next.duration;
+    ensureScheduleDraft();
+    if (!state.scheduleDraft[slot]) throw new Error(`Unknown slot ${slot}`);
+    syncDraftSlotFromForm(slot);
+    const next = clone(state.prefs);
+    next.timeslots[slot] = clone(state.scheduleDraft[slot]);
+    pruneDisabledFromTimeslots(next);
+    await savePrefs(true, next);
+    state.prefs = next;
+    state.dirtySlots.delete(slot);
+    if (state.dirtySlots.size === 0) {
+      clearDirty('schedule');
+    }
+    toast(`${slot} saved`);
   } catch (error) {
     toast(error.message, 'error');
-    return;
   }
-  await savePrefs(true);
-  clearDirty('schedule');
-  toast(`${slot} saved`);
 }
 
 function addScheduleSlot() {
@@ -2601,7 +2836,9 @@ function addScheduleSlot() {
   if (!name) return;
   const key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
   if (!key) return;
-  if (state.prefs.timeslots[key]) {
+  syncDraftFromFormLoose();
+  const draft = ensureScheduleDraft();
+  if (draft[key]) {
     toast('That slot already exists', 'error');
     return;
   }
@@ -2610,56 +2847,84 @@ function addScheduleSlot() {
   DAYS.forEach(day => {
     dayTime[day] = { from: '08:00', till: '10:00' };
   });
-  state.prefs.timeslots[key] = {
+  draft[key] = {
     day_time: dayTime,
     duration: 30,
     pages: firstPage ? [firstPage] : [],
   };
+  state.dirtySlots.add(key);
   markDirty('schedule');
-  renderSchedule();
+  renderPanel('schedule', { force: true });
 }
 
 function removeScheduleSlot(slot) {
   if (!confirm(`Delete the ${slot} slot?`)) return;
-  delete state.prefs.timeslots[slot];
+  syncDraftFromFormLoose();
+  const draft = ensureScheduleDraft();
+  delete draft[slot];
+  state.dirtySlots.add(slot);
   markDirty('schedule');
-  renderSchedule();
+  renderPanel('schedule', { force: true });
 }
 
 async function saveAllSchedule() {
   try {
-    Object.keys(state.prefs.timeslots).forEach(slot => {
-      const next = collectScheduleSlot(slot);
-      state.prefs.timeslots[slot].day_time = next.day_time;
-      state.prefs.timeslots[slot].duration = next.duration;
-      state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
-    });
+    const draft = ensureScheduleDraft();
+    Object.keys(draft).forEach(syncDraftSlotFromForm);
+    const next = clone(state.prefs);
+    next.timeslots = clone(draft);
+    pruneDisabledFromTimeslots(next);
+    await savePrefs(true, next);
+    state.prefs = next;
+    state.dirtySlots.clear();
+    clearDirty('schedule');
+    renderPanel('schedule', { force: true });
+    toast('Schedule saved');
   } catch (error) {
     toast(error.message, 'error');
-    return;
   }
-  await savePrefs(true);
-  clearDirty('schedule');
-  toast('Schedule saved');
 }
 
-async function saveRotationOnly(module) {
+/**
+ * Shared save path for module panels: reads the rotation card, optionally builds the
+ * module config, posts the SAVED prefs (never the schedule draft) and the config.
+ * On failure the prefs are rolled back (if they were not written) and the panel stays
+ * dirty so the form keeps the user's edits for a retry.
+ */
+async function saveModule(module, { label, buildConfig = null, afterSave = null } = {}) {
+  const previousPrefs = clone(state.prefs);
+  let prefsSaved = false;
   try {
     readRotation(module);
+    pruneDisabledFromTimeslots();
+    const config = buildConfig ? buildConfig() : null;
+    await savePrefs(true);
+    prefsSaved = true;
+    if (config) {
+      await api('module_config', {
+        method: 'POST',
+        query: `module=${encodeURIComponent(module)}`,
+        body: config,
+      });
+    }
+    clearDirty(module);
+    fixCurrentPageAfterToggle(module);
+    if (afterSave) await afterSave();
+    renderNav();
+    renderPanel(module, { force: true });
+    toast(`${label} saved`);
+    return true;
   } catch (error) {
-    return;
+    if (!prefsSaved) {
+      state.prefs = previousPrefs;
+    }
+    toast(error.message || `${label}: save failed`, 'error');
+    return false;
   }
-  Object.keys(state.prefs.timeslots).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
-  });
-  await savePrefs(true);
-  clearDirty(module);
-  if (state.currentPage === module && !isModuleEnabled(module)) {
-    state.currentPage = enabledModules()[0] || null;
-    state.currentUrl = state.currentPage ? state.prefs.pages[state.currentPage].url : null;
-  }
-  renderAll();
-  toast(`${module} rotation saved`);
+}
+
+function saveRotationOnly(module) {
+  return saveModule(module, { label: `${GALLERY_TITLES[module] || module} rotation` });
 }
 
 async function toggleSidebarModule(module, enabled) {
@@ -2668,127 +2933,112 @@ async function toggleSidebarModule(module, enabled) {
     renderNav();
     return;
   }
-  state.prefs.pages[module].enabled = !!enabled;
-  Object.keys(state.prefs.timeslots || {}).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
-  });
-  if (state.currentPage === module && !enabled) {
-    state.currentPage = enabledModules()[0] || null;
-    state.currentUrl = state.currentPage ? state.prefs.pages[state.currentPage].url : null;
+  const previousPrefs = clone(state.prefs);
+  const previousPage = state.currentPage;
+  const previousUrl = state.currentUrl;
+  try {
+    state.prefs.pages[module].enabled = !!enabled;
+    pruneDisabledFromTimeslots();
+    fixCurrentPageAfterToggle(module);
+    await savePrefs(true);
+  } catch (error) {
+    state.prefs = previousPrefs;
+    state.currentPage = previousPage;
+    state.currentUrl = previousUrl;
+    renderNav();
+    toast(`Could not ${enabled ? 'enable' : 'disable'} ${module}: ${error.message}`, 'error');
+    return;
   }
-  await savePrefs(true);
-  renderAll();
+  renderNav();
+  // The module panel may hold unsaved edits; only patch its enabled toggle in that case.
+  const enabledInput = document.querySelector(`[data-rotation="${module}"][data-field="enabled"]`);
+  if (enabledInput) enabledInput.checked = !!enabled;
+  refreshPanels(['live', 'schedule', module]);
   toast(`${module} ${enabled ? 'enabled' : 'disabled'}`);
 }
 
-async function saveClock() {
-  try {
-    readRotation('clock');
-  } catch (error) {
-    return;
-  }
-  Object.keys(state.prefs.timeslots).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
+function saveClock() {
+  return saveModule('clock', {
+    label: 'Clock settings',
+    buildConfig: () => {
+      state.configs.clock.enabled_styles = [...document.querySelectorAll('[data-clock-style]')]
+        .filter(node => node.checked)
+        .map(node => node.dataset.clockStyle);
+      return state.configs.clock;
+    },
   });
-  state.configs.clock.enabled_styles = [...document.querySelectorAll('[data-clock-style]')]
-    .filter(node => node.checked)
-    .map(node => node.dataset.clockStyle);
-  await savePrefs(true);
-  await api('module_config', {
-    method: 'POST',
-    query: `module=clock`,
-    body: state.configs.clock,
-  });
-  clearDirty('clock');
-  toast('Clock settings saved');
 }
 
-async function saveNewspaper() {
-  try {
-    readRotation('newspaper');
-  } catch (error) {
-    return;
-  }
-  Object.keys(state.prefs.timeslots).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
+function saveNewspaper() {
+  return saveModule('newspaper', {
+    label: 'Newspaper settings',
+    buildConfig: () => {
+      const papers = collectNewspaperFromForm();
+      for (const [name, paper] of Object.entries(papers)) {
+        if (!/^[A-Za-z0-9_-]+$/.test(paper.prefix)) {
+          throw new Error(`Invalid tag for ${name}: letters, numbers, _ and - only`);
+        }
+      }
+      return papers;
+    },
+    afterSave: loadNewspaperPreview,
   });
-  for (const [name, paper] of Object.entries(state.configs.newspaper)) {
-    const input = document.querySelector(`[data-paper-style="${CSS.escape(name)}"]`);
-    const prefixInput = document.querySelector(`[data-paper-prefix="${CSS.escape(name)}"]`);
-    const enabledInput = document.querySelector(`[data-paper-enabled="${CSS.escape(name)}"]`);
-    paper.style = input?.value || paper.style;
-    paper.prefix = prefixInput?.value || paper.prefix;
-    paper.enabled = enabledInput ? !!enabledInput.checked : paper.enabled !== false;
-  }
-  await savePrefs(true);
-  await api('module_config', {
-    method: 'POST',
-    query: `module=newspaper`,
-    body: state.configs.newspaper,
-  });
-  await loadNewspaperPreview();
-  clearDirty('newspaper');
-  renderNewspaper();
-  toast('Newspaper settings saved');
 }
 
-async function saveComics() {
-  try {
-    readRotation('comics');
-  } catch (error) {
-    return;
-  }
-  Object.keys(state.prefs.timeslots).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
+// Read the comics form (gaps + per-strip settings) into state.configs.comics.
+function collectComicsConfigFromForm() {
+  const cfg = state.configs.comics;
+  cfg.gap_strip = Number(el('comics-gap-strip')?.value ?? cfg.gap_strip ?? 0) || 0;
+  cfg.gap_min = Number(el('comics-gap-min')?.value ?? cfg.gap_min ?? 0) || 0;
+  cfg.gap_max = Number(el('comics-gap-max')?.value ?? cfg.gap_max ?? 0) || 0;
+  cfg.strips = cfg.strips.map(strip => {
+    const slug = CSS.escape(strip.slug);
+    const enabledInput = document.querySelector(`[data-strip-enabled="${slug}"]`);
+    return {
+      ...strip,
+      enabled: enabledInput ? !!enabledInput.checked : !!strip.enabled,
+      fetch_mode: document.querySelector(`[data-strip-fetch-mode="${slug}"]`)?.value || strip.fetch_mode || 'auto',
+      image_url: document.querySelector(`[data-strip-image-url="${slug}"]`)?.value?.trim() ?? strip.image_url ?? '',
+    };
   });
-  state.configs.comics.gap_strip = Number(el('comics-gap-strip').value || 0);
-  state.configs.comics.gap_min = Number(el('comics-gap-min').value || 0);
-  state.configs.comics.gap_max = Number(el('comics-gap-max').value || 0);
-  state.configs.comics.strips = state.configs.comics.strips.map(strip => ({
-    ...strip,
-    enabled: !!document.querySelector(`[data-strip-enabled="${strip.slug}"]`)?.checked,
-    fetch_mode: document.querySelector(`[data-strip-fetch-mode="${strip.slug}"]`)?.value || strip.fetch_mode || 'auto',
-    image_url: document.querySelector(`[data-strip-image-url="${strip.slug}"]`)?.value?.trim() || '',
-  }));
-  await savePrefs(true);
-  await api('module_config', {
-    method: 'POST',
-    query: `module=comics`,
-    body: state.configs.comics,
+  return cfg;
+}
+
+function saveComics() {
+  return saveModule('comics', {
+    label: 'Comics settings',
+    buildConfig: collectComicsConfigFromForm,
+    afterSave: loadComicsPreview,
   });
-  await loadComicsPreview();
-  clearDirty('comics');
-  renderComics();
-  toast('Comics settings saved');
 }
 
 async function persistComicsModuleConfig() {
-  state.configs.comics.gap_strip = Number(el('comics-gap-strip')?.value || state.configs.comics.gap_strip || 0);
-  state.configs.comics.gap_min = Number(el('comics-gap-min')?.value || state.configs.comics.gap_min || 0);
-  state.configs.comics.gap_max = Number(el('comics-gap-max')?.value || state.configs.comics.gap_max || 0);
-  state.configs.comics.strips = state.configs.comics.strips.map(strip => ({
-    ...strip,
-    enabled: !!document.querySelector(`[data-strip-enabled="${strip.slug}"]`)?.checked,
-    fetch_mode: document.querySelector(`[data-strip-fetch-mode="${strip.slug}"]`)?.value || strip.fetch_mode || 'auto',
-    image_url: document.querySelector(`[data-strip-image-url="${strip.slug}"]`)?.value?.trim() || '',
-  }));
   await api('module_config', {
     method: 'POST',
     query: 'module=comics',
-    body: state.configs.comics,
+    body: collectComicsConfigFromForm(),
   });
 }
 
 function addSource() {
+  syncAiNewsSourcesFromForm();
   state.configs.ainews.sources.push({ label: 'New', feed: '' });
   markDirty('ainews');
-  renderAiNews();
+  renderPanel('ainews', { force: true });
 }
 
 function removeSource(index) {
+  syncAiNewsSourcesFromForm();
   state.configs.ainews.sources.splice(index, 1);
   markDirty('ainews');
-  renderAiNews();
+  renderPanel('ainews', { force: true });
+}
+
+function syncAiNewsSourcesFromForm() {
+  state.configs.ainews.sources = (state.configs.ainews.sources || []).map((source, index) => ({
+    label: document.querySelector(`[data-source-label="${index}"]`)?.value ?? source.label,
+    feed: document.querySelector(`[data-source-feed="${index}"]`)?.value ?? source.feed,
+  }));
 }
 
 async function validateFeed(index) {
@@ -2806,86 +3056,84 @@ async function validateFeed(index) {
 }
 
 function toggleApiInputs() {
-  document.querySelectorAll('[data-ainews-field$="_api_key"]').forEach(node => {
+  document.querySelectorAll('[data-ainews-secret]').forEach(node => {
     node.type = node.type === 'password' ? 'text' : 'password';
   });
 }
 
-async function saveAiNews() {
-  try {
-    readRotation('ainews');
-  } catch (error) {
-    return;
-  }
-  Object.keys(state.prefs.timeslots).forEach(slot => {
-    state.prefs.timeslots[slot].pages = state.prefs.timeslots[slot].pages.filter(page => isModuleEnabled(page));
+function saveAiNews() {
+  return saveModule('ainews', {
+    label: 'AiNews settings',
+    buildConfig: () => {
+      syncAiNewsSourcesFromForm();
+      const cfg = state.configs.ainews;
+      cfg.sources = cfg.sources.filter(source => source.label && source.feed);
+      document.querySelectorAll('[data-ainews-field]').forEach(node => {
+        cfg[node.dataset.ainewsField] = node.value;
+      });
+      cfg.provider_order = String(cfg.provider_order_text || '')
+        .split(',')
+        .map(item => item.trim().toLowerCase())
+        .filter(Boolean);
+      delete cfg.provider_order_text;
+      // Secrets are write-only: send only newly typed keys plus explicit clears.
+      const body = { ...cfg };
+      delete body.secrets;
+      document.querySelectorAll('[data-ainews-secret]').forEach(node => {
+        const value = node.value.trim();
+        if (value) body[node.dataset.ainewsSecret] = value;
+      });
+      body.clear_secrets = [...document.querySelectorAll('[data-ainews-clear]')]
+        .filter(node => node.checked)
+        .map(node => node.dataset.ainewsClear);
+      return body;
+    },
+    afterSave: async () => {
+      await Promise.all([loadConfig('ainews'), loadAiNewsPreview()]);
+    },
   });
-  state.configs.ainews.sources = state.configs.ainews.sources.map((source, index) => ({
-    label: document.querySelector(`[data-source-label="${index}"]`)?.value || source.label,
-    feed: document.querySelector(`[data-source-feed="${index}"]`)?.value || source.feed,
-  })).filter(source => source.label && source.feed);
-
-  document.querySelectorAll('[data-ainews-field]').forEach(node => {
-    state.configs.ainews[node.dataset.ainewsField] = node.value;
-  });
-  state.configs.ainews.provider_order = String(state.configs.ainews.provider_order_text || '')
-    .split(',')
-    .map(item => item.trim().toLowerCase())
-    .filter(Boolean);
-  delete state.configs.ainews.provider_order_text;
-
-  await savePrefs(true);
-  await api('module_config', {
-    method: 'POST',
-    query: `module=ainews`,
-    body: state.configs.ainews,
-  });
-  await loadAiNewsPreview();
-  clearDirty('ainews');
-  renderAiNews();
-  toast('AiNews settings saved');
 }
 
 async function uploadImages(module, files) {
   if (!files?.length) return;
+  let uploaded = 0;
   for (const file of files) {
     const formData = new FormData();
     formData.append('module', module);
     formData.append('file', file);
-    const response = await fetch(`api.php?action=upload&module=${encodeURIComponent(module)}`, {
-      method: 'POST',
-      headers: {
-        'X-CSRF-Token': ADMIN_BOOT.csrfToken,
-      },
-      body: formData,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.error) {
-      toast(data.error || `Upload failed for ${file.name}`, 'error');
-      continue;
+    try {
+      await api('upload', { method: 'POST', query: `module=${encodeURIComponent(module)}`, body: formData });
+      uploaded += 1;
+    } catch (error) {
+      toast(`${file.name}: ${error.message}`, 'error');
     }
   }
-  await loadGallery(module);
-  renderGalleryPanel(module, module === 'art' ? 'Art' : module === 'quotes' ? 'Quotes' : 'Haynesmann');
-  toast('Upload complete');
+  try {
+    await loadGallery(module);
+    renderPanel(module, { force: true });
+  } catch (error) {
+    toast(`Could not reload gallery: ${error.message}`, 'error');
+  }
+  if (uploaded) {
+    toast(uploaded === files.length ? 'Upload complete' : `Uploaded ${uploaded} of ${files.length}`);
+  }
 }
 
-async function deleteImage(module, encodedFile) {
-  const file = decodeURIComponent(encodedFile);
+async function deleteImage(module, file) {
   if (!confirm(`Delete ${file}?`)) return;
-  await api('delete_image', { method: 'POST', body: { module, file } });
-  await loadGallery(module);
-  renderGalleryPanel(module, module === 'art' ? 'Art' : module === 'quotes' ? 'Quotes' : 'Haynesmann');
-  toast('Image deleted');
+  try {
+    await api('delete_image', { method: 'POST', body: { module, file } });
+    await loadGallery(module);
+    renderPanel(module, { force: true });
+    toast('Image deleted');
+  } catch (error) {
+    toast(`Delete failed: ${error.message}`, 'error');
+  }
 }
 
 function startStripDrag(slug) {
   state.dragSlug = slug;
-  document.querySelector(`[data-strip="${slug}"]`)?.classList.add('dragging');
-}
-
-function allowStripDrop(event) {
-  event.preventDefault();
+  document.querySelector(`[data-strip="${CSS.escape(slug)}"]`)?.classList.add('dragging');
 }
 
 function dropStrip(targetSlug) {
@@ -2893,29 +3141,27 @@ function dropStrip(targetSlug) {
   document.querySelectorAll('.strip-item').forEach(node => node.classList.remove('dragging'));
   if (!sourceSlug || sourceSlug === targetSlug) return;
 
-  const strips = [...state.configs.comics.strips];
-  const moving = strips.find(strip => strip.slug === sourceSlug);
-  const target = strips.find(strip => strip.slug === targetSlug);
-  if (!moving || !target) return;
-
-  const ordered = [...strips];
+  collectComicsConfigFromForm();
+  const ordered = [...state.configs.comics.strips];
   const from = ordered.findIndex(strip => strip.slug === sourceSlug);
   const to = ordered.findIndex(strip => strip.slug === targetSlug);
+  if (from < 0 || to < 0) return;
   ordered.splice(to, 0, ordered.splice(from, 1)[0]);
 
   state.configs.comics.strips = ordered.map((strip, index) => ({ ...strip, order: index + 1 }));
   markDirty('comics');
-  renderComics();
+  renderPanel('comics', { force: true });
 }
 
 function addComicStripFromUrl() {
   const url = el('newComicUrl').value.trim();
-  const match = url.match(/gocomics\.com\/([^\/?#]+)/i);
+  const match = url.match(/gocomics\.com\/([A-Za-z0-9_-]+)/i);
   if (!match) {
     toast('Paste a full GoComics URL', 'error');
     return;
   }
   const slug = match[1].toLowerCase();
+  collectComicsConfigFromForm();
   if (state.configs.comics.strips.some(strip => strip.slug === slug)) {
     toast('That comic is already in the list', 'error');
     return;
@@ -2931,15 +3177,16 @@ function addComicStripFromUrl() {
   });
   el('newComicUrl').value = '';
   markDirty('comics');
-  renderComics();
+  renderPanel('comics', { force: true });
 }
 
 function removeComicStrip(slug) {
+  collectComicsConfigFromForm();
   state.configs.comics.strips = state.configs.comics.strips
     .filter(strip => strip.slug !== slug)
     .map((strip, index) => ({ ...strip, order: index + 1 }));
   markDirty('comics');
-  renderComics();
+  renderPanel('comics', { force: true });
 }
 
 async function uploadComicStrip(slug, files) {
@@ -2949,27 +3196,21 @@ async function uploadComicStrip(slug, files) {
     const formData = new FormData();
     formData.append('slug', slug);
     formData.append('file', file);
-    const response = await fetch(`api.php?action=comics_upload_strip`, {
-      method: 'POST',
-      headers: {
-        'X-CSRF-Token': ADMIN_BOOT.csrfToken,
-      },
-      body: formData,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.error) {
-      throw new Error(data.error || `Upload failed for ${file.name}`);
-    }
+    await api('comics_upload_strip', { method: 'POST', body: formData });
     const strip = state.configs.comics.strips.find(item => item.slug === slug);
     if (strip) {
       strip.fetch_mode = 'upload';
       strip.image_url = '';
     }
+    const modeInput = document.querySelector(`[data-strip-fetch-mode="${CSS.escape(slug)}"]`);
+    if (modeInput) modeInput.value = 'upload';
+    const urlInput = document.querySelector(`[data-strip-image-url="${CSS.escape(slug)}"]`);
+    if (urlInput) urlInput.value = '';
     await persistComicsModuleConfig();
     await loadComicsPreview();
     clearDirty('comics');
     state.previewVersion = Date.now();
-    renderComics();
+    renderPanel('comics', { force: true });
     toast('Comic strip uploaded');
   } catch (error) {
     toast(error.message || 'Comic upload failed', 'error');
@@ -2977,17 +3218,14 @@ async function uploadComicStrip(slug, files) {
 }
 
 async function importComicStripUrl(slug) {
-  const url = document.querySelector(`[data-strip-image-url="${slug}"]`)?.value?.trim() || '';
+  const url = document.querySelector(`[data-strip-image-url="${CSS.escape(slug)}"]`)?.value?.trim() || '';
   if (!/^https?:\/\//i.test(url)) {
     toast('Paste a full image URL', 'error');
     return;
   }
   try {
-    const strip = state.configs.comics.strips.find(item => item.slug === slug);
-    if (strip) {
-      strip.fetch_mode = 'url';
-      strip.image_url = url;
-    }
+    const modeInput = document.querySelector(`[data-strip-fetch-mode="${CSS.escape(slug)}"]`);
+    if (modeInput) modeInput.value = 'url';
     await persistComicsModuleConfig();
     await api('comics_import_url', {
       method: 'POST',
@@ -2996,7 +3234,7 @@ async function importComicStripUrl(slug) {
     await loadComicsPreview();
     clearDirty('comics');
     state.previewVersion = Date.now();
-    renderComics();
+    renderPanel('comics', { force: true });
     toast('Comic strip imported from URL');
   } catch (error) {
     toast(error.message || 'Comic URL import failed', 'error');
@@ -3007,11 +3245,17 @@ async function openPaperModal() {
   el('paperModal').classList.remove('hidden');
   el('paperModal').classList.add('flex');
   if (!state.papers) {
-    const data = await api('newspapers');
-    state.papers = data.papers || [];
+    el('paperModalBody').textContent = 'Loading…';
+    try {
+      const data = await api('newspapers');
+      state.papers = data.papers || [];
+    } catch (error) {
+      el('paperModalBody').textContent = `Could not load the paper list: ${error.message}`;
+      return;
+    }
   }
-  const list = state.papers.map(paper => `
-    <button type="button" onclick="addPaper('${encodeURIComponent(paper.name)}','${paper.prefix}','${encodeURIComponent(paper.style)}')" class="mb-2 flex w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left transition hover:border-amber-400/50 hover:bg-white/5">
+  const list = state.papers.map((paper, index) => `
+    <button type="button" data-action="add-paper" data-paper-index="${index}" class="mb-2 flex w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left transition hover:border-amber-400/50 hover:bg-white/5">
       <span>${escapeHtml(paper.name)}</span>
       <span class="text-xs text-slate-500">${escapeHtml(paper.prefix)}</span>
     </button>
@@ -3082,14 +3326,31 @@ async function submitComicsCookies() {
   }
 }
 
-function addPaper(encodedName, prefix, encodedStyle) {
-  const name = decodeURIComponent(encodedName);
-  const style = decodeURIComponent(encodedStyle);
-  const key = name.replace(/[^A-Za-z0-9]/g, '') || prefix;
+// Copy the newspaper form (prefix/style/enabled) into state.configs.newspaper.
+function collectNewspaperFromForm() {
+  for (const [name, paper] of Object.entries(state.configs.newspaper || {})) {
+    const styleInput = document.querySelector(`[data-paper-style="${CSS.escape(name)}"]`);
+    const prefixInput = document.querySelector(`[data-paper-prefix="${CSS.escape(name)}"]`);
+    const enabledInput = document.querySelector(`[data-paper-enabled="${CSS.escape(name)}"]`);
+    paper.style = styleInput?.value || paper.style;
+    paper.prefix = (prefixInput?.value || paper.prefix || '').trim();
+    paper.enabled = enabledInput ? !!enabledInput.checked : paper.enabled !== false;
+  }
+  return state.configs.newspaper;
+}
+
+function addPaper(name, prefix, style) {
+  prefix = String(prefix || '').trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(prefix)) {
+    toast('Newspaper tags may only contain letters, numbers, _ and -', 'error');
+    return;
+  }
+  collectNewspaperFromForm();
+  const key = String(name || '').replace(/[^A-Za-z0-9]/g, '') || prefix;
   state.configs.newspaper[key] = { prefix, style, enabled: true };
   markDirty('newspaper');
   closePaperModal();
-  renderNewspaper();
+  renderPanel('newspaper', { force: true });
 }
 
 function addCustomPaper() {
@@ -3101,25 +3362,30 @@ function addCustomPaper() {
   const rawName = el('customPaperName').value.trim();
   const name = rawName || normalizeNameFromPrefix(prefix);
   const style = prefix.indexOf('NY_') === 0 ? 'width:100%;margin:-70px 0 0 0' : 'width:99%;margin:-4.6rem 0 0 0';
-  addPaper(encodeURIComponent(name), prefix, encodeURIComponent(style));
+  addPaper(name, prefix, style);
 }
 
-function removeNewspaper(encodedName) {
-  const name = decodeURIComponent(encodedName);
+function removeNewspaper(name) {
+  collectNewspaperFromForm();
   delete state.configs.newspaper[name];
   markDirty('newspaper');
-  renderNewspaper();
+  renderPanel('newspaper', { force: true });
 }
 
 async function restartContainer() {
   if (!confirm('Restart the web content container now?\n\nThis will briefly interrupt the live frame, admin UI, and module previews while the container comes back up.')) return;
-  await api('restart', { method: 'POST' });
-  toast('Restart requested');
+  try {
+    await api('restart', { method: 'POST' });
+    toast('Restart requested');
+  } catch (error) {
+    toast(`Restart failed: ${error.message}`, 'error');
+  }
 }
 
 async function testHaConfig() {
   try {
     const config = readHaForm();
+    // A blank token field makes the server test with the saved token.
     const result = await api('ha_status', { method: 'POST', body: config });
     state.haStatus = {
       kind: 'success',
@@ -3140,14 +3406,15 @@ async function saveGeneralConfig() {
     const result = await api('general_config', { method: 'POST', body: config });
     state.generalConfig = result.config || config;
     applyFramePreviewMetrics();
-    if (state.socket?.readyState === WebSocket.OPEN) {
-      state.socket.send(JSON.stringify({ task: 'refreshActivity' }));
-    }
+    const notified = sendSocketTask({ task: 'refreshActivity' });
     await loadSystemStatus();
     renderHaPanel();
     renderCurrentPanel();
     syncPreviewScale();
     toast(`General settings saved (${frameResolutionLabel()})`);
+    if (!notified) {
+      toast('The display is not connected, so it did not refresh its activity yet.', 'warning');
+    }
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -3157,9 +3424,10 @@ async function saveHaConfig() {
   try {
     const config = readHaForm();
     const result = await api('ha_config', { method: 'POST', body: config });
-    state.haConfig = result.config || config;
-    if (state.socket?.readyState === WebSocket.OPEN) {
-      state.socket.send(JSON.stringify({ task: 'refreshActivity' }));
+    state.haConfig = result.config;
+    const notified = sendSocketTask({ task: 'refreshActivity' });
+    if (!notified) {
+      toast('The display is not connected, so it did not refresh its activity yet.', 'warning');
     }
     await loadSystemStatus();
     state.haStatus = {
@@ -3211,6 +3479,48 @@ document.addEventListener('change', event => {
   if (section) {
     markDirty(section);
   }
+});
+// Delegated handlers: user-controlled values (file names, slugs, slot names, paper names)
+// travel in data- attributes, never inside inline onclick strings.
+document.addEventListener('click', event => {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  const d = target.dataset;
+  switch (d.action) {
+    case 'toggle-slot-page': toggleSlotPage(d.slotName, d.page); break;
+    case 'remove-slot': removeScheduleSlot(d.slotName); break;
+    case 'save-slot': saveScheduleSlot(d.slotName); break;
+    case 'remove-newspaper': removeNewspaper(d.name); break;
+    case 'delete-image': deleteImage(d.module, d.file); break;
+    case 'remove-strip': removeComicStrip(d.slug); break;
+    case 'import-strip-url': importComicStripUrl(d.slug); break;
+    case 'add-paper': {
+      const paper = state.papers?.[Number(d.paperIndex)];
+      if (paper) addPaper(paper.name, paper.prefix, paper.style);
+      break;
+    }
+  }
+});
+document.addEventListener('change', event => {
+  const target = event.target;
+  if (target.dataset?.uploadGallery) {
+    uploadImages(target.dataset.uploadGallery, target.files).finally(() => { target.value = ''; });
+  } else if (target.dataset?.uploadStrip) {
+    uploadComicStrip(target.dataset.uploadStrip, target.files).finally(() => { target.value = ''; });
+  }
+});
+document.addEventListener('dragstart', event => {
+  const strip = event.target.closest?.('[data-strip]');
+  if (strip) startStripDrag(strip.dataset.strip);
+});
+document.addEventListener('dragover', event => {
+  if (event.target.closest?.('[data-strip]')) event.preventDefault();
+});
+document.addEventListener('drop', event => {
+  const strip = event.target.closest?.('[data-strip]');
+  if (!strip) return;
+  event.preventDefault();
+  dropStrip(strip.dataset.strip);
 });
 window.addEventListener('resize', syncPreviewScale);
 boot();

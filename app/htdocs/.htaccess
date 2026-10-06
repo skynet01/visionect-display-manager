@@ -6,3 +6,9 @@
         Header always unset ETag
     </FilesMatch>
 </IfModule>
+
+# Module config.json files hold settings (and encrypted API keys) and *.bak* files may hold old
+# source or secrets: never serve them over HTTP. PHP reads them from disk, which this does not affect.
+<FilesMatch "^(config\.json|.*\.bak.*)$">
+    Require all denied
+</FilesMatch>

@@ -4,7 +4,8 @@ const VISIONECT_CONFIG_DIR = __DIR__ . '/../config';
 const VISIONECT_ADMIN_ACCOUNT_FILE = VISIONECT_CONFIG_DIR . '/admin_account.json';
 const VISIONECT_SECRET_KEY_FILE = VISIONECT_CONFIG_DIR . '/secret_key.b64';
 const VISIONECT_RUNTIME_STATUS_FILE = VISIONECT_CONFIG_DIR . '/runtime_status.json';
-const VISIONECT_REMOTE_CONTROL_FILE = VISIONECT_CONFIG_DIR . '/remote_control.json';
+const VISIONECT_REMOTE_CONTROL_FILE = VISIONECT_CONFIG_DIR . '/remote_control.json'; // legacy single slot
+const VISIONECT_CONTROL_QUEUE_DIR = VISIONECT_CONFIG_DIR . '/control_queue';
 
 function visionect_read_json_file(string $path): ?array
 {
@@ -16,14 +17,109 @@ function visionect_read_json_file(string $path): ?array
     return json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : null;
 }
 
-function visionect_write_json_file(string $path, array $data): void
+/**
+ * Write $data to $path atomically: temp file in the same directory, chmod to
+ * match the existing target (or $defaultMode for new files), then rename()
+ * over the target. Readers see either the old or the new file, never a torn one.
+ * Returns false (and leaves the target untouched) on any failure.
+ */
+function visionect_write_file_atomic(string $path, string $data, int $defaultMode = 0644): bool
 {
     $dir = dirname($path);
-    if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        error_log('visionect_write_file_atomic: cannot create directory ' . $dir);
+        return false;
     }
 
-    file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+    clearstatcache(true, $path);
+    $mode = file_exists($path) ? (fileperms($path) & 0777) : $defaultMode;
+
+    $tmp = $dir . '/.' . basename($path) . '.' . bin2hex(random_bytes(6)) . '.tmp';
+    $fh = @fopen($tmp, 'xb');
+    if ($fh === false) {
+        error_log('visionect_write_file_atomic: cannot create temp file in ' . $dir);
+        return false;
+    }
+
+    $length = strlen($data);
+    $written = 0;
+    while ($written < $length) {
+        $n = fwrite($fh, $written === 0 ? $data : substr($data, $written));
+        if ($n === false || $n === 0) {
+            break;
+        }
+        $written += $n;
+    }
+    $flushed = fflush($fh);
+    $closed = fclose($fh);
+
+    if ($written !== $length || !$flushed || !$closed) {
+        @unlink($tmp);
+        error_log('visionect_write_file_atomic: short write for ' . $path);
+        return false;
+    }
+
+    @chmod($tmp, $mode);
+    if (!@rename($tmp, $path)) {
+        @unlink($tmp);
+        error_log('visionect_write_file_atomic: rename failed for ' . $path);
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Encode $data as pretty JSON and write it atomically. Returns false WITHOUT
+ * touching the target if encoding fails (e.g. INF/NAN, recursion depth).
+ */
+function visionect_write_json_atomic(string $path, $data, int $extraFlags = 0): bool
+{
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | $extraFlags);
+    if ($json === false) {
+        error_log('visionect_write_json_atomic: json_encode failed for ' . $path . ': ' . json_last_error_msg());
+        return false;
+    }
+
+    return visionect_write_file_atomic($path, $json . "\n");
+}
+
+/**
+ * Run $fn while holding an exclusive flock on the sidecar "<path>.lock".
+ * Re-entrant within one process (nested calls on the same path don't deadlock).
+ * If the lock file cannot be opened, $fn still runs (writes stay atomic).
+ */
+function visionect_with_file_lock(string $path, callable $fn)
+{
+    static $held = [];
+
+    $lockPath = $path . '.lock';
+    if (!empty($held[$lockPath])) {
+        return $fn();
+    }
+
+    $fh = @fopen($lockPath, 'c');
+    if ($fh === false || !flock($fh, LOCK_EX)) {
+        if ($fh !== false) {
+            fclose($fh);
+        }
+        error_log('visionect_with_file_lock: could not lock ' . $lockPath . '; continuing unlocked');
+        return $fn();
+    }
+
+    $held[$lockPath] = true;
+    try {
+        return $fn();
+    } finally {
+        unset($held[$lockPath]);
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+}
+
+function visionect_write_json_file(string $path, array $data): void
+{
+    visionect_write_json_atomic($path, $data);
 }
 
 function visionect_send_no_cache_headers(): void
@@ -72,9 +168,9 @@ function visionect_is_private_network_request(): bool
 
     if (filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
         $normalized = strtolower($remote);
-        return str_starts_with($normalized, 'fc')
-            || str_starts_with($normalized, 'fd')
-            || str_starts_with($normalized, 'fe80:');
+        return strpos($normalized, 'fc') === 0
+            || strpos($normalized, 'fd') === 0
+            || strpos($normalized, 'fe80:') === 0;
     }
 
     return false;
@@ -168,19 +264,23 @@ function visionect_create_admin_account(string $username, string $password): arr
     if (strlen($password) < 12) {
         throw new InvalidArgumentException('Password must be at least 12 characters.');
     }
-    if (visionect_has_admin_account()) {
-        throw new RuntimeException('An admin account already exists.');
-    }
+    return visionect_with_file_lock(VISIONECT_ADMIN_ACCOUNT_FILE, function () use ($username, $password) {
+        if (visionect_has_admin_account()) {
+            throw new RuntimeException('An admin account already exists.');
+        }
 
-    $now = gmdate('Y-m-d\TH:i:s\Z');
-    $account = [
-        'username' => $username,
-        'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-        'created_at' => $now,
-        'updated_at' => $now,
-    ];
-    visionect_write_json_file(VISIONECT_ADMIN_ACCOUNT_FILE, $account);
-    return $account;
+        $now = gmdate('Y-m-d\TH:i:s\Z');
+        $account = [
+            'username' => $username,
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+        if (!visionect_write_json_atomic(VISIONECT_ADMIN_ACCOUNT_FILE, $account)) {
+            throw new RuntimeException('Could not save the admin account.');
+        }
+        return $account;
+    });
 }
 
 function visionect_verify_login(string $username, string $password): bool
@@ -229,11 +329,12 @@ function visionect_require_csrf_json(): void
 function visionect_secret_key(): string
 {
     if (!file_exists(VISIONECT_SECRET_KEY_FILE)) {
-        $dir = dirname(VISIONECT_SECRET_KEY_FILE);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        file_put_contents(VISIONECT_SECRET_KEY_FILE, base64_encode(random_bytes(32)) . "\n", LOCK_EX);
+        visionect_with_file_lock(VISIONECT_SECRET_KEY_FILE, function () {
+            clearstatcache(true, VISIONECT_SECRET_KEY_FILE);
+            if (!file_exists(VISIONECT_SECRET_KEY_FILE)) {
+                visionect_write_file_atomic(VISIONECT_SECRET_KEY_FILE, base64_encode(random_bytes(32)) . "\n", 0600);
+            }
+        });
     }
 
     $raw = trim((string)file_get_contents(VISIONECT_SECRET_KEY_FILE));
@@ -327,10 +428,15 @@ function visionect_base64url_decode(string $value): string
     return $decoded === false ? '' : $decoded;
 }
 
-function visionect_issue_websocket_token(?string $username, int $ttl = 3600): string
+/**
+ * Signed WebSocket token. $role is 'admin' (session-authenticated admin UI) or 'display'
+ * (the public frame shell); visionectd only runs control tasks for role=admin.
+ */
+function visionect_issue_websocket_token(?string $username, int $ttl = 3600, string $role = 'display'): string
 {
     $claims = [
         'sub' => (string)($username ?? ''),
+        'role' => $role === 'admin' ? 'admin' : 'display',
         'exp' => time() + max(60, $ttl),
     ];
     $payload = json_encode($claims, JSON_UNESCAPED_SLASHES);
@@ -369,6 +475,16 @@ function visionect_validate_websocket_token(string $token): ?array
     return $claims;
 }
 
+/** Role carried by validated token claims. Tokens without a role claim (pre-role) are 'display'. */
+function visionect_websocket_token_role(?array $claims): string
+{
+    if (!is_array($claims) || trim((string)($claims['sub'] ?? '')) === '') {
+        return 'display';
+    }
+
+    return ($claims['role'] ?? '') === 'admin' ? 'admin' : 'display';
+}
+
 function visionect_runtime_status_defaults(): array
 {
     return [
@@ -392,14 +508,33 @@ function visionect_read_runtime_status(): array
 
 function visionect_write_runtime_status(array $status): void
 {
-    visionect_write_json_file(VISIONECT_RUNTIME_STATUS_FILE, array_replace_recursive(visionect_runtime_status_defaults(), $status));
+    visionect_with_file_lock(VISIONECT_RUNTIME_STATUS_FILE, function () use ($status) {
+        visionect_write_json_atomic(VISIONECT_RUNTIME_STATUS_FILE, array_replace_recursive(visionect_runtime_status_defaults(), $status));
+    });
+}
+
+/**
+ * Locked read-modify-write of runtime_status.json. $fn receives the current
+ * status and returns the new full status. Use this when the new value depends
+ * on the old one (e.g. newspaper next_index) so concurrent writers can't lose updates.
+ */
+function visionect_mutate_runtime_status(callable $fn): array
+{
+    return visionect_with_file_lock(VISIONECT_RUNTIME_STATUS_FILE, function () use ($fn) {
+        $status = $fn(visionect_read_runtime_status());
+        if (!is_array($status)) {
+            return visionect_read_runtime_status();
+        }
+        visionect_write_runtime_status($status);
+        return $status;
+    });
 }
 
 function visionect_update_runtime_status(array $patch): array
 {
-    $status = array_replace_recursive(visionect_read_runtime_status(), $patch);
-    visionect_write_runtime_status($status);
-    return $status;
+    return visionect_mutate_runtime_status(function (array $status) use ($patch) {
+        return array_replace_recursive($status, $patch);
+    });
 }
 
 function visionect_track_frame_request(string $module): void
@@ -450,6 +585,16 @@ function visionect_record_frame_response(string $module, string $exactUrl, strin
     ]);
 }
 
+/**
+ * Control queue: one JSON file per command in config/control_queue/, named
+ * "<microtime>-<rand>.json" so a lexical sort is FIFO. Writers (control.php, the admin)
+ * write atomically; visionectd takes the files in order and deletes each one.
+ */
+function visionect_control_queue_dir(): string
+{
+    return VISIONECT_CONTROL_QUEUE_DIR;
+}
+
 function visionect_queue_remote_control(array $command): array
 {
     $queued = array_merge([
@@ -458,17 +603,105 @@ function visionect_queue_remote_control(array $command): array
         'page' => null,
         'queued_at' => gmdate('Y-m-d\TH:i:s\Z'),
     ], $command);
-    visionect_write_json_file(VISIONECT_REMOTE_CONTROL_FILE, $queued);
+    $queued['queued_ts'] = microtime(true);
+
+    $dir = visionect_control_queue_dir();
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0750, true);
+    }
+    $name = sprintf('%017.6f', $queued['queued_ts']) . '-' . bin2hex(random_bytes(4)) . '.json';
+    $queued['queue_file'] = $name;
+    $queued['queued'] = visionect_write_json_atomic($dir . '/' . $name, $queued);
     return $queued;
 }
 
-function visionect_take_remote_control(): ?array
+/**
+ * Take every queued command, oldest first. Each file is deleted as it is taken; unreadable
+ * files are deleted and skipped. Also drains the legacy single-slot remote_control.json.
+ */
+function visionect_take_remote_controls(): array
 {
-    $command = visionect_read_json_file(VISIONECT_REMOTE_CONTROL_FILE);
-    if (!is_array($command)) {
-        return null;
+    $commands = [];
+
+    $legacy = visionect_read_json_file(VISIONECT_REMOTE_CONTROL_FILE);
+    if (file_exists(VISIONECT_REMOTE_CONTROL_FILE)) {
+        @unlink(VISIONECT_REMOTE_CONTROL_FILE);
+    }
+    if (is_array($legacy)) {
+        $commands[] = $legacy;
     }
 
+    $files = glob(visionect_control_queue_dir() . '/*.json');
+    if (!is_array($files) || empty($files)) {
+        return $commands;
+    }
+    sort($files, SORT_STRING);
+    foreach ($files as $file) {
+        $command = visionect_read_json_file($file);
+        if (!@unlink($file) && file_exists($file)) {
+            error_log('visionect_take_remote_controls: could not delete ' . $file);
+            continue;
+        }
+        if (is_array($command)) {
+            $commands[] = $command;
+        }
+    }
+
+    return $commands;
+}
+
+/** Oldest queued command, or null. Kept for callers that want one at a time. */
+function visionect_take_remote_control(): ?array
+{
+    $files = glob(visionect_control_queue_dir() . '/*.json');
+    if (is_array($files) && !empty($files)) {
+        sort($files, SORT_STRING);
+        $command = visionect_read_json_file($files[0]);
+        @unlink($files[0]);
+        return is_array($command) ? $command : null;
+    }
+
+    $legacy = visionect_read_json_file(VISIONECT_REMOTE_CONTROL_FILE);
     @unlink(VISIONECT_REMOTE_CONTROL_FILE);
-    return $command;
+    return $legacy;
+}
+
+/**
+ * Ask visionectd to exit cleanly (task restartDaemon). The container command chain then ends
+ * and Docker's unless-stopped policy restarts the container. Waits up to $waitSeconds for the
+ * daemon to take the command; if it doesn't (daemon hung), sends SIGTERM to the daemon PID
+ * recorded in runtime_status, which ends the chain the same way. Returns true when either worked.
+ */
+function visionect_request_daemon_restart(float $waitSeconds = 4.0): bool
+{
+    $queued = visionect_queue_remote_control([
+        'task' => 'restartDaemon',
+        'source' => PHP_SAPI === 'cli' ? 'cli' : 'admin',
+    ]);
+    if (empty($queued['queued'])) {
+        return false;
+    }
+
+    $path = visionect_control_queue_dir() . '/' . $queued['queue_file'];
+    $deadline = microtime(true) + max(0.5, $waitSeconds);
+    while (microtime(true) < $deadline) {
+        clearstatcache(true, $path);
+        if (!file_exists($path)) {
+            return true;
+        }
+        usleep(200000);
+    }
+
+    // Not taken: never leave a restart queued to fire later.
+    @unlink($path);
+
+    $pid = (int)(visionect_read_runtime_status()['daemon']['pid'] ?? 0);
+    if ($pid > 1 && function_exists('posix_kill')) {
+        $cmdline = (string)@file_get_contents('/proc/' . $pid . '/cmdline');
+        if (strpos($cmdline, 'visionectd.php') !== false) {
+            return posix_kill($pid, 15);
+        }
+    }
+
+    return false;
 }
