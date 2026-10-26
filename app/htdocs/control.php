@@ -12,6 +12,13 @@ if (!visionect_is_private_network_request()) {
     exit;
 }
 
+// Optional caller allowlist (admin > General > allowed callers). Empty: any LAN address.
+if (!visionect_control_ip_allowed((string)($_SERVER['REMOTE_ADDR'] ?? ''))) {
+    http_response_code(403);
+    echo json_encode(['error' => 'This address is not allowed to control the frame'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 $body = null;
 $contentType = (string)($_SERVER['CONTENT_TYPE'] ?? '');
 if (strpos($contentType, 'application/json') !== false) {

@@ -467,6 +467,23 @@ function validate_general_config(array $config): array
     if ($controlToken !== '' && (strlen($controlToken) < 8 || !preg_match('/^[\x21-\x7e]+$/', $controlToken))) {
         fail('Control token must be at least 8 printable characters without spaces');
     }
+    // Optional control.php caller allowlist: an array or a comma/space-separated string of IPs.
+    $ipsInput = $config['control_allowed_ips'] ?? [];
+    $ipsInput = is_array($ipsInput) ? $ipsInput : preg_split('/[\s,]+/', (string)$ipsInput);
+    $allowedIps = [];
+    foreach ($ipsInput as $ip) {
+        $ip = trim((string)$ip);
+        if ($ip === '') {
+            continue;
+        }
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            fail('Allowed control callers must be IP addresses: ' . $ip);
+        }
+        $allowedIps[$ip] = true;
+    }
+    if (count($allowedIps) > 20) {
+        fail('List at most 20 allowed control callers');
+    }
 
     return [
         'frame_width' => $width,
@@ -475,6 +492,7 @@ function validate_general_config(array $config): array
         'wake_time' => $wakeTime,
         'sleep_time' => $sleepTime,
         'control_token' => $controlToken,
+        'control_allowed_ips' => array_keys($allowedIps),
     ];
 }
 

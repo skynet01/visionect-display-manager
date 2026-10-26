@@ -1088,6 +1088,11 @@ function renderHaPanel() {
               <input id="general-control-token-clear" type="checkbox"> Clear the saved token
             </label>` : ''}
           </div>
+          <label class="text-xs text-slate-400 sm:col-span-2">
+            <span class="mb-1 block">control.php allowed callers (optional)</span>
+            <input id="general-control-ips" type="text" value="${escapeHtml((state.generalConfig.control_allowed_ips || []).join(', '))}" class="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-inherit outline-none" placeholder="Any local-network address">
+            <span class="mt-1 block text-[11px] text-slate-500">Comma-separated IP addresses. Requests from the Docker host arrive from the bridge gateway (for example 172.22.0.1).</span>
+          </label>
         </div>
         <div class="mt-4 flex justify-end">
           <button type="button" onclick="saveGeneralConfig()" class="rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-amber-400">Save general settings</button>
@@ -1193,6 +1198,7 @@ function readGeneralForm() {
     // Write-only: blank keeps the saved control token server-side.
     control_token: el('general-control-token')?.value?.trim() || '',
     clear_secrets: el('general-control-token-clear')?.checked ? ['control_token'] : [],
+    control_allowed_ips: el('general-control-ips')?.value?.trim() || '',
   };
 }
 

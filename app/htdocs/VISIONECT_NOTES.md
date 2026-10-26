@@ -95,7 +95,7 @@ Container command: `apache2-foreground & cd /app/cli && php cron.php && php visi
 - `http.php`: `visionect_http_get($url, $timeout = 20, $headers = [], $curlOpts = [])` and `visionect_http_post($url, $body, $headers = [], $timeout = 30)`.
   - Both return `ok` (2xx and a non-empty body), `status`, `body`, `error`, `headers` (lower-cased) and `content_type`.
   - They send a Chrome User-Agent. Always check `['ok']`, not just a non-null body.
-- `runtime.php`: `visionect_ha_config()`, `visionect_general_config()`, `visionect_is_sleep_window()`, `visionect_ha_presence()` (HA curl: 2s connect / 3s total), `visionect_compute_activity()` (`home` / `away` / `sleep`), and `visionect_control_token_required()` / `visionect_control_token_ok()`.
+- `runtime.php`: `visionect_ha_config()`, `visionect_general_config()`, `visionect_is_sleep_window()`, `visionect_ha_presence()` (HA curl: 2s connect / 3s total), `visionect_compute_activity()` (`home` / `away` / `sleep`), `visionect_control_token_required()` / `visionect_control_token_ok()`, and `visionect_control_ip_allowed()` (the `control_allowed_ips` check).
 - `image.php`: `visionect_image_to_frame($srcPathOrBlob, $destPath, $opts)` reads the first frame, flattens alpha, converts to greyscale and writes a JPEG atomically.
   - `mode` is `contain` (default, letterbox), `cover` (centre-crop) or `fit_width` (scale down to width, free height; used for comic strips).
   - Other options are `width`/`height` (default 1440×2560), `background` (default white), `quality` (default 82) and `upscale`.
@@ -465,7 +465,7 @@ Add/remove sources freely — story count is fully dynamic, no hardcoded limit a
 - Module saves go through one `saveModule(module, {label, buildConfig, afterSave})` helper with error handling and toasts.
 - Schedule slot edits live in `state.scheduleDraft` until the schedule is saved, so saving another module no longer saves (or drops) unsaved slot edits.
 - The WebSocket client fetches a fresh role=admin token (`api('ws_token')`) before every connect/reconnect, so controls keep working after the 1h token expires. visionectd replies `{"type":"auth","ok":...,"role":...}` after connect.
-- General settings include a write-only `control_token` for `control.php` (currently unset, so control.php is open to the LAN).
+- General settings include a write-only `control_token` for `control.php` (currently unset) and `control_allowed_ips`, an optional caller allowlist. List the Home Assistant / Node-RED host, `127.0.0.1` and the Docker bridge gateway (how requests from the Docker host arrive). An empty list allows any LAN address.
 
 ### Current admin capabilities
 
@@ -529,7 +529,8 @@ Public endpoints:
   - Returns a 24h `role=display` WebSocket token used by `/` when opening the display socket. Display tokens can watch but not control.
 - `GET|POST /control.php?task=<task>[&page=<module>]`
   - Local-network automation endpoint for Home Assistant / Node-RED (private-network clients only).
-  - Optional token: if General settings has a `control_token`, send it as the `X-Control-Token` header or a `token` param (401 otherwise). Currently unset.
+  - Optional caller allowlist: if General settings has `control_allowed_ips`, other addresses get 403. Empty by default.
+  - Optional token: if General settings has a `control_token`, send it as the `X-Control-Token` header or a `token` param (401 otherwise). Unset by default.
   - Supported tasks: `setPage`, `resumeSchedule`, `reloadCurrent`, `pause`, `unpause`, `reloadPrefs`, `refreshActivity`.
   - GET and JSON POST both work. Each command becomes one file in `config/control_queue/`; visionectd drops queued commands older than 5 minutes.
 
@@ -545,7 +546,7 @@ Admin API: `/admin/api.php?action=<action>`.
 | `module_config&module=<name>` | GET / POST | Module `config.json` for `clock`, `newspaper`, `art`, `haynesmann`, `comics`, `quotes`, `ainews`. For ainews, GET returns `secrets: {<field>: {set: bool}}` instead of keys |
 | `account` | POST | Change admin username/password (needs `current_password`; new password ≥ 12 chars). There is no GET |
 | `ha_config` | GET / POST | Home Assistant presence-pause settings. The token is write-only (`secrets.access_token.set`) |
-| `general_config` | GET / POST | Frame resolution, mirrored sleep window and the write-only `control_token` (`config/general_settings.json`) |
+| `general_config` | GET / POST | Frame resolution, mirrored sleep window, the write-only `control_token` and the `control_allowed_ips` list (`config/general_settings.json`) |
 | `ha_status` | POST | Test the HA connection with the (unsaved) form values; a blank token uses the stored one. There is no GET |
 | `gallery&module=<art\|quotes\|haynesmann>` | GET | `{ files: [{name, mtime}] }` |
 | `thumb&module=<m>&file=<name>&v=<mtime>` | GET | Cached ~300px JPEG thumbnail from `<module>/.thumbs/` (generated on demand; private cache 7 days) |
@@ -794,6 +795,7 @@ try {
 
 ## Changelog
 
+- **2026-10-25** — `control.php` caller allowlist (`control_allowed_ips` in General settings, admin field "control.php allowed callers"). `general_settings.json` was created holding only that key, so the legacy sleep window in `ha_integration.json` still applies.
 - **2026-10-05** — Admin manual "Run now" cron actions now record the process exit code and output in runtime status and show failures in the admin.
 - **2026-10-05** — Cleanup from the 2026-10-05 review.
   - Libs: atomic/locked writes in `lib/security.php`; new `lib/http.php`, `lib/image.php` and `lib/gallery_page.php`; PHP 7.4 fix (`str_starts_with` removed).

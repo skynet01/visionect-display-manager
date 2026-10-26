@@ -41,6 +41,7 @@ function visionect_general_config_defaults(): array
         'sleep_enabled' => false,
         'wake_time' => '08:00',
         'sleep_time' => '23:00',
+        'control_allowed_ips' => [],
     ];
 }
 
@@ -156,4 +157,19 @@ function visionect_control_token_ok(?string $provided): bool
     $expected = trim(visionect_decrypt_secret($stored));
     $provided = trim((string)$provided);
     return $expected !== '' && $provided !== '' && hash_equals($expected, $provided);
+}
+
+/**
+ * Check the caller's address against general settings `control_allowed_ips`.
+ * An empty list allows any private-network caller, as before.
+ */
+function visionect_control_ip_allowed(string $remote): bool
+{
+    $general = visionect_read_json_file(VISIONECT_GENERAL_CONFIG_FILE) ?? [];
+    $allowed = $general['control_allowed_ips'] ?? [];
+    if (!is_array($allowed) || $allowed === []) {
+        return true;
+    }
+
+    return in_array(trim($remote), array_map('strval', $allowed), true);
 }

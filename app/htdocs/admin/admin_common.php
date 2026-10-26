@@ -21,6 +21,7 @@ function default_general_config(): array
         'sleep_enabled' => false,
         'wake_time' => '08:00',
         'sleep_time' => '23:00',
+        'control_allowed_ips' => [],
     ];
 }
 
