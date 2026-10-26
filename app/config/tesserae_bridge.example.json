@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "url": "http://tesserae.local:8765",
+  "token": "<Tesserae webhook token>",
+  "pages": {
+    "newspaper": "<page id>",
+    "comics": "<page id>",
+    "ainews": "<page id>",
+    "art": "<page id>",
+    "quotes": "<page id>",
+    "haynesmann": "<page id>"
+  },
+  "device_ids": [
+    "<device id>"
+  ]
+}

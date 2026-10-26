@@ -533,6 +533,7 @@ Public endpoints:
   - Optional token: if General settings has a `control_token`, send it as the `X-Control-Token` header or a `token` param (401 otherwise). Unset by default.
   - Supported tasks: `setPage`, `resumeSchedule`, `reloadCurrent`, `pause`, `unpause`, `reloadPrefs`, `refreshActivity`.
   - GET and JSON POST both work. Each command becomes one file in `config/control_queue/`; visionectd drops queued commands older than 5 minutes.
+  - Tesserae bridge (2026-10-26): when `config/tesserae_bridge.json` (mode 600) has `{"enabled": true, "url", "token", "pages": {module: page_id}, "device_ids"}`, a `setPage` is also forwarded to Tesserae's `POST /api/v1/push` (bearer webhook token, 5 s timeout) and the response gains `"tesserae": {"ok", "status"}`. Home Assistant / Node-RED automations then keep working when Tesserae drives the frame. Helper: `visionect_tesserae_forward()` in `lib/runtime.php`.
 
 Admin API: `/admin/api.php?action=<action>`.
 - Every action requires a logged-in session, and every non-GET request also needs the CSRF token.
@@ -795,6 +796,7 @@ try {
 
 ## Changelog
 
+- **2026-10-26** — `control.php` forwards `setPage` to Tesserae when `config/tesserae_bridge.json` exists (see API quick reference).
 - **2026-10-25** — `control.php` caller allowlist (`control_allowed_ips` in General settings, admin field "control.php allowed callers"). `general_settings.json` was created holding only that key, so the legacy sleep window in `ha_integration.json` still applies.
 - **2026-10-05** — Admin manual "Run now" cron actions now record the process exit code and output in runtime status and show failures in the admin.
 - **2026-10-05** — Cleanup from the 2026-10-05 review.

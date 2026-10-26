@@ -11,6 +11,7 @@ app/htdocs/comics/metadata.json
 app/htdocs/**/*.log
 app/htdocs/**/*.tmp
 app/config/gocomics_auth.json
+app/config/tesserae_bridge.json
 **/.DS_Store
 
 # runtime/cache (2026-10-05 cleanup)

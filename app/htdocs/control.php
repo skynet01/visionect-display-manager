@@ -75,7 +75,13 @@ if (empty($queued['queued'])) {
 }
 
 unset($queued['queued'], $queued['queue_file']);
-echo json_encode([
+$response = [
     'ok' => true,
     'queued' => $queued,
-], JSON_UNESCAPED_SLASHES);
+];
+// When Tesserae drives the frame, forward setPage there too (config/tesserae_bridge.json).
+$forwarded = visionect_tesserae_forward($task, $page);
+if ($forwarded !== null) {
+    $response['tesserae'] = $forwarded;
+}
+echo json_encode($response, JSON_UNESCAPED_SLASHES);

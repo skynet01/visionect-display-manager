@@ -12,6 +12,7 @@ const VISIONECT_HA_CONFIG_FILE = VISIONECT_CONFIG_DIR . '/ha_integration.json';
 const VISIONECT_GENERAL_CONFIG_FILE = VISIONECT_CONFIG_DIR . '/general_settings.json';
 const VISIONECT_HA_CONNECT_TIMEOUT = 2;
 const VISIONECT_HA_TOTAL_TIMEOUT = 3;
+const VISIONECT_TESSERAE_BRIDGE_FILE = VISIONECT_CONFIG_DIR . '/tesserae_bridge.json';
 
 function visionect_ha_config_defaults(): array
 {
@@ -172,4 +173,42 @@ function visionect_control_ip_allowed(string $remote): bool
     }
 
     return in_array(trim($remote), array_map('strval', $allowed), true);
+}
+
+/**
+ * Forward a control.php setPage to Tesserae when it drives the frame, so Home Assistant /
+ * Node-RED automations keep working unchanged. Off unless config/tesserae_bridge.json
+ * (mode 600) holds {"enabled": true, "url", "token", "pages": {module: page_id}, "device_ids"}.
+ * Returns null when nothing was forwarded, else {"ok", "status"[, "error"]}.
+ */
+function visionect_tesserae_forward(string $task, string $page): ?array
+{
+    if ($task !== 'setPage' || $page === '') {
+        return null;
+    }
+    $bridge = visionect_read_json_file(VISIONECT_TESSERAE_BRIDGE_FILE);
+    if (!is_array($bridge) || empty($bridge['enabled'])) {
+        return null;
+    }
+    $pageId = (string)(($bridge['pages'] ?? [])[$page] ?? '');
+    $url = rtrim((string)($bridge['url'] ?? ''), '/');
+    $token = (string)($bridge['token'] ?? '');
+    if ($pageId === '' || $url === '' || $token === '') {
+        return null;
+    }
+    $body = ['page_id' => $pageId];
+    if (!empty($bridge['device_ids']) && is_array($bridge['device_ids'])) {
+        $body['device_ids'] = array_values($bridge['device_ids']);
+    }
+    $result = visionect_http_post(
+        $url . '/api/v1/push',
+        (string)json_encode($body),
+        ['Content-Type: application/json', 'Authorization: Bearer ' . $token],
+        5
+    );
+    $out = ['ok' => (bool)$result['ok'], 'status' => (int)$result['status']];
+    if (!$result['ok'] && $result['error'] !== null && $result['error'] !== '') {
+        $out['error'] = (string)$result['error'];
+    }
+    return $out;
 }
