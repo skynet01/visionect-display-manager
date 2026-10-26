@@ -349,6 +349,12 @@ GoComics requires specific headers and cookies. Use `visionect_http_get()` (curl
 **6. Do NOT match the cookie by the exact name `bunny_shield`.**
 It is now `bunny_shield_id_<n>`. Match by prefix, or the expiry/wait logic silently never runs.
 
+**8. Do NOT treat the bare string `bunny-shield` as a challenge marker.** (2026-10-26)
+Normal GoComics pages now load `/.bunny-shield/bd/bunnyprint.js`. That false positive made every refresh fail from 2026-10-09 to 2026-10-26. A real challenge has a `cdn-challenge` header, "Establishing a secure connection", or `data-pow=`. It now arrives as **HTTP 403** (about 2.2 KB), so read the body of the HTTP error. The PoW is unchanged: Argon2id, diff 13, t=2, m=512.
+
+**9. Do NOT warm the cookie on a URL the cron will fetch.** (2026-10-26)
+Bunny Shield challenges a session that revisits the same URL. `refresh.py` warms up on the first strip's page from 7 days ago, and the cron fetches today, −1 and −2 days, so the cron's requests are first visits.
+
 **7. Do NOT let cookie-refresh write strip images.**
 It used to download raw strips over `comics/<slug>.jpg` after the PHP cron, leaving colour GIF data in `.jpg` files. Strip downloads belong to `comics/cron.php` only.
 

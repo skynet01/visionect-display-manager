@@ -16,7 +16,7 @@ import tempfile
 import urllib.request
 import urllib.error
 import http.cookiejar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 CONFIG_FILE = "/app/htdocs/comics/config.json"
 AUTH_FILE   = "/app/config/gocomics_auth.json"
@@ -51,6 +51,7 @@ def make_opener(cookie_jar) -> urllib.request.OpenerDirector:
 
 
 def http_get(opener, url: str) -> tuple:
+    """Return (status, body, headers)."""
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
@@ -58,12 +59,31 @@ def http_get(opener, url: str) -> tuple:
     })
     try:
         with opener.open(req, timeout=20) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
+            return resp.status, resp.read().decode("utf-8", errors="replace"), resp.headers
     except urllib.error.HTTPError as e:
-        return e.code, ""
+        # The challenge page now comes back as 403 with data-pow in the body.
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        return e.code, body, e.headers
     except Exception as e:
         print(f"  [http] GET {url}: {e}", flush=True)
-        return 0, ""
+        return 0, "", {}
+
+
+def is_challenge(html: str, headers) -> bool:
+    """True only for the real BunnyCDN challenge page.
+
+    Normal GoComics pages now load /.bunny-shield/bd/bunnyprint.js, so the bare
+    string "bunny-shield" is not a challenge marker (that false positive broke
+    every refresh from 2026-10-09 to 2026-10-26).
+    """
+    return (
+        bool(headers and headers.get("cdn-challenge"))
+        or "Establishing a secure connection" in html
+        or 'data-pow="' in html
+    )
 
 
 def solve_pow(data_pow: str):
@@ -115,12 +135,15 @@ def bypass_challenge(opener, url: str) -> bool:
     """
     Fetch url, solve BunnyCDN PoW if challenged, return True if page is accessible.
     """
-    status, html = http_get(opener, url)
+    status, html, headers = http_get(opener, url)
     if status == 0:
         return False
 
-    if "Establishing a secure connection" not in html and "bunny-shield" not in html:
-        print(f"  [challenge] No challenge at {url}", flush=True)
+    if not is_challenge(html, headers):
+        if status >= 400:
+            print(f"  [challenge] HTTP {status} at {url}", flush=True)
+            return False
+        print(f"  [challenge] No challenge at {url} ({len(html)} bytes)", flush=True)
         return True
 
     print("  [challenge] BunnyCDN challenge detected, solving PoW...", flush=True)
@@ -161,8 +184,8 @@ def bypass_challenge(opener, url: str) -> bool:
         print("  [challenge] PoW submission rejected", flush=True)
         return False
 
-    _, html2 = http_get(opener, url)
-    if "Establishing a secure connection" in html2:
+    _, html2, headers2 = http_get(opener, url)
+    if is_challenge(html2, headers2):
         print("  [challenge] Still challenged after PoW solve", flush=True)
         return False
 
@@ -229,9 +252,11 @@ def main() -> int:
     cookie_jar = http.cookiejar.CookieJar()
     opener = make_opener(cookie_jar)
 
-    # Solve the challenge once using the first strip's URL (local date, like the PHP cron)
+    # Warm up on the first strip's page from a week ago. Bunny Shield challenges a session
+    # that revisits a URL, so never touch the dates the PHP cron fetches (today, -1, -2 days).
     first_slug = strips[0]["slug"]
-    warm_url = f"{BASE_URL}/{first_slug}/{datetime.now().strftime('%Y/%m/%d')}"
+    warm_date = (datetime.now() - timedelta(days=7)).strftime('%Y/%m/%d')
+    warm_url = f"{BASE_URL}/{first_slug}/{warm_date}"
     print(f"[refresh] Solving BunnyCDN challenge via {warm_url}", flush=True)
     if not bypass_challenge(opener, warm_url):
         print("[refresh] ERROR: Could not bypass challenge", file=sys.stderr, flush=True)

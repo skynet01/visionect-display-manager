@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo
 tz = ZoneInfo(os.environ.get('TZ') or 'America/Phoenix')
 now = datetime.now(tz)
 target = now.replace(hour=5, minute=55, second=0, microsecond=0)
-if target <= now:
+# sleep can wake a second early; a 5-minute margin stops a second run that day.
+if target <= now + timedelta(minutes=5):
     target += timedelta(days=1)
 print(max(60, int((target - now).total_seconds())))
 ")
